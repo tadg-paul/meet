@@ -104,7 +104,8 @@
             const params = new URLSearchParams(location.search);
             const opts = {
                 roomName: "{{.AppID}}/{{.RoomName}}",
-                parentNode: document.querySelector('#jaas-container')
+                parentNode: document.querySelector('#jaas-container'),
+                userInfo: { displayName: '' }
             };
             const jwt = params.get('jwt');
             if (jwt) {
