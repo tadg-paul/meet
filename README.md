@@ -36,20 +36,29 @@ meet --help                 # show usage
 meet --version              # print version
 ```
 
-### remote-token (installed as meet-token)
+### meet-helper (remote SSH shim)
 
 ```
-meet-token <host> <room>    # SSH to host and generate a moderator URL
+meet-helper <host> <subcommand> [args...]
+# Examples:
+meet-helper light-hugger token --room workshop-april
+meet-helper light-hugger create --room demo \
+  --from 2026-05-25T19:00:00Z --until 2026-05-25T21:00:00Z
+meet-helper light-hugger list --filter active
+meet-helper light-hugger cancel --room demo
 ```
+
+`meet-helper` ssh's to the named host and runs any `meet` subcommand there,
+supplying the canonical deploy-time config cascade automatically.
 
 ### Makefile targets
 
 ```
-make build          # build meet and remote-token binaries
+make build          # build meet and meet-helper binaries
 make serve          # build and run with local config
 make token ROOM=x   # generate a moderator JWT URL for a room
 make test           # lint + regression tests
-make install        # symlink meet and meet-token to ~/.local/bin
+make install        # symlink meet and meet-helper to ~/.local/bin
 make sync           # git add/commit/pull/push
 make release        # tag and push a new version
 ```
@@ -127,7 +136,7 @@ switch back to speaker view if preferred.
 | Path | Purpose |
 |------|---------|
 | `cmd/meet/main.go` | Entrypoint: serve and token subcommands |
-| `cmd/remote-token/main.go` | SSH wrapper for remote token generation |
+| `cmd/meet-helper/main.go` | SSH wrapper for invoking any meet subcommand on a remote host |
 | `internal/server/server.go` | HTTP server, routing, domain parsing |
 | `internal/server/webhook.go` | Webhook handler, download/upload pipeline |
 | `internal/server/static/index.html` | Meeting page template (embedded) |

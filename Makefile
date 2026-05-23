@@ -15,8 +15,8 @@ build:
 	@echo "==> building $(APP) for $$(go env GOOS)/$$(go env GOARCH)"
 	@mkdir -p $(dir $(BUILD_OUTPUT))
 	go build -o $(BUILD_OUTPUT) $(MAIN_PKG)
-	go build -o ./bin/remote-token ./cmd/remote-token
-	@ls -la $(BUILD_OUTPUT) ./bin/remote-token
+	go build -o ./bin/meet-helper ./cmd/meet-helper
+	@ls -la $(BUILD_OUTPUT) ./bin/meet-helper
 
 test: lint
 	@echo "==> running regression tests"
@@ -42,11 +42,11 @@ clean:
 
 install: build
 	ln -sfn $(CURDIR)/$(BUILD_OUTPUT) $(HOME)/.local/bin/$(APP)
-	ln -sfn $(CURDIR)/bin/remote-token $(HOME)/.local/bin/meet-token
+	ln -sfn $(CURDIR)/bin/meet-helper $(HOME)/.local/bin/meet-helper
 
 uninstall:
 	rm -f $(HOME)/.local/bin/$(APP)
-	rm -f $(HOME)/.local/bin/meet-token
+	rm -f $(HOME)/.local/bin/meet-helper
 
 serve: build
 	CONFIG_PATH=$(CONFIG_PATH) SECRETS_PATH=$(SECRETS_PATH) $(BUILD_OUTPUT)

@@ -4,9 +4,11 @@
 
 ## Overview
 
-meet is a single Go binary with two subcommands (`serve` and `token`) and
-a companion SSH wrapper (`remote-token`). The server embeds all static
-assets (HTML template, font) and requires no external runtime dependencies.
+meet is a single Go binary with several subcommands (`serve`, `token`,
+`create`, `cancel`, `list`) and a companion SSH wrapper (`meet-helper`) for
+invoking any subcommand on a remote deploy host. The server embeds all
+static assets (HTML template, font) and requires no external runtime
+dependencies.
 
 ## Components
 
