@@ -32,6 +32,13 @@ type Config struct {
 	AppID        string
 	DataDir      string
 	WebDAV       *WebDAVConfig
+	// Stream is the Cloudflare Stream client used for video uploads. When
+	// nil, RECORDING_UPLOADED webhooks log "stream not configured" and the
+	// file remains in download/ for manual recovery (issue #6).
+	Stream             *StreamClient
+	Recordings         *RecordingsLog
+	PlayerBaseURL      string
+	LocalRetentionDays int
 	WebhookToken string
 	Logger       *slog.Logger
 	// Rooms is the registry consulted by handleRoom. When non-nil, every
@@ -114,25 +121,36 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
-// StartPurgeTicker runs a daily ticker that removes files older than 30 days
-// from the uploaded directory. Cancel the context to stop.
+// StartPurgeTicker runs a daily ticker that removes files older than the
+// configured local-retention window from the uploaded directory. Cancel the
+// context to stop.
 func (s *Server) StartPurgeTicker(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 
-		// Run once on startup.
-		s.PurgeOldUploads(30 * 24 * time.Hour)
+		retention := s.localRetention()
+		s.PurgeOldUploads(retention)
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.PurgeOldUploads(30 * 24 * time.Hour)
+				s.PurgeOldUploads(s.localRetention())
 			}
 		}
 	}()
+}
+
+// localRetention returns the configured local-retention window with a 14-day
+// fallback when the field is zero (legacy / test setups).
+func (s *Server) localRetention() time.Duration {
+	days := s.cfg.LocalRetentionDays
+	if days <= 0 {
+		days = 14
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

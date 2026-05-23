@@ -34,11 +34,33 @@ type appConfig struct {
 }
 
 type recording struct {
-	WebDAVURL      string `yaml:"webdav-url"`
-	WebDAVPath     string `yaml:"webdav-path"`
-	WebDAVUser     string `yaml:"webdav-user"`
-	WebDAVPassword string `yaml:"webdav-password"`
-	WebhookToken   string `yaml:"webhook-token"`
+	WebDAV             webdav     `yaml:"webdav"`
+	WebhookToken       string     `yaml:"webhook-token"`
+	PlayerBaseURL      string     `yaml:"player-base-url"`
+	LocalRetentionDays int        `yaml:"local-retention-days"`
+	Cloudflare         cloudflare `yaml:"cloudflare"`
+	SMTP               smtp       `yaml:"smtp"`
+}
+
+type webdav struct {
+	URL      string `yaml:"url"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Path     string `yaml:"path"`
+}
+
+type cloudflare struct {
+	APIToken           string `yaml:"api-token"`
+	AccountID          string `yaml:"account-id"`
+	StreamCustomerCode string `yaml:"stream-customer-code"`
+	StreamTTLDays      int    `yaml:"stream-ttl-days"`
+}
+
+type smtp struct {
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+	User string `yaml:"user"`
+	Pass string `yaml:"pass"`
 }
 
 type keys8x8 struct {
@@ -166,25 +188,66 @@ func runServe(args []string) {
 		}
 	}
 
-	srvCfg := server.Config{
-		Addr:         cfg.Addr,
-		BaseURL:      cfg.BaseURL,
-		AppID:        cfg.Keys8x8.AppID,
-		DataDir:      dataDir,
-		WebhookToken: cfg.Recording.WebhookToken,
-		Logger:       logger,
-		Rooms:        rooms,
-		JWTPublicKey: pubKey,
+	// Open the recordings log. Tracks CF Stream uploads (#6).
+	recordings, err := server.NewRecordingsLog(dataDir)
+	if err != nil {
+		logger.Error("opening recordings log", "error", err)
+		os.Exit(1)
 	}
 
-	if cfg.Recording.WebDAVURL != "" {
+	// Resolve defaults for the non-secret #6 fields.
+	playerBaseURL := cfg.Recording.PlayerBaseURL
+	if playerBaseURL == "" {
+		playerBaseURL = "https://media.lobb.ie/"
+	}
+	streamTTLDays := cfg.Recording.Cloudflare.StreamTTLDays
+	if streamTTLDays <= 0 {
+		streamTTLDays = 90
+	}
+	localRetentionDays := cfg.Recording.LocalRetentionDays
+	if localRetentionDays <= 0 {
+		localRetentionDays = 14
+	}
+
+	// Construct the Stream client if creds are present.
+	var streamClient *server.StreamClient
+	if cfg.Recording.Cloudflare.AccountID != "" && cfg.Recording.Cloudflare.APIToken != "" {
+		streamClient = server.NewStreamClient(server.StreamConfig{
+			AccountID: cfg.Recording.Cloudflare.AccountID,
+			APIToken:  cfg.Recording.Cloudflare.APIToken,
+			TTLDays:   streamTTLDays,
+		}, nil)
+		logger.Info("Cloudflare Stream upload configured",
+			"player_base_url", playerBaseURL,
+			"stream_ttl_days", streamTTLDays,
+		)
+	} else {
+		logger.Warn("Cloudflare Stream not configured — recording uploads will fail until cloudflare.account-id and cloudflare.api-token are set")
+	}
+
+	srvCfg := server.Config{
+		Addr:               cfg.Addr,
+		BaseURL:            cfg.BaseURL,
+		AppID:              cfg.Keys8x8.AppID,
+		DataDir:            dataDir,
+		WebhookToken:       cfg.Recording.WebhookToken,
+		Logger:             logger,
+		Rooms:              rooms,
+		JWTPublicKey:       pubKey,
+		Stream:             streamClient,
+		Recordings:         recordings,
+		PlayerBaseURL:      playerBaseURL,
+		LocalRetentionDays: localRetentionDays,
+	}
+
+	if cfg.Recording.WebDAV.URL != "" {
 		srvCfg.WebDAV = &server.WebDAVConfig{
-			URL:      cfg.Recording.WebDAVURL,
-			Path:     cfg.Recording.WebDAVPath,
-			User:     cfg.Recording.WebDAVUser,
-			Password: cfg.Recording.WebDAVPassword,
+			URL:      cfg.Recording.WebDAV.URL,
+			Path:     cfg.Recording.WebDAV.Path,
+			User:     cfg.Recording.WebDAV.User,
+			Password: cfg.Recording.WebDAV.Password,
 		}
-		logger.Info("WebDAV recording storage configured", "path", cfg.Recording.WebDAVPath)
+		logger.Info("WebDAV recording storage configured", "path", cfg.Recording.WebDAV.Path)
 	}
 
 	srv := server.New(srvCfg)

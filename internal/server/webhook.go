@@ -4,9 +4,11 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
@@ -155,10 +157,21 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check WebDAV is configured.
-	if s.cfg.WebDAV == nil {
-		http.Error(w, "recording storage not configured", http.StatusServiceUnavailable)
-		return
+	// Check storage is configured for this file type. Video recordings go
+	// to Cloudflare Stream (issue #6); transcripts and chat continue to use
+	// WebDAV. If neither backend is wired for the requested file type, the
+	// webhook returns 503 so 8x8 retries until the operator fixes config.
+	switch fileType {
+	case "recording":
+		if s.cfg.Stream == nil {
+			http.Error(w, "stream upload not configured", http.StatusServiceUnavailable)
+			return
+		}
+	case "transcript", "chat":
+		if s.cfg.WebDAV == nil {
+			http.Error(w, "webdav not configured", http.StatusServiceUnavailable)
+			return
+		}
 	}
 
 	// Deduplicate.
@@ -179,10 +192,10 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Respond immediately — process asynchronously.
 	w.WriteHeader(http.StatusOK)
 
-	go s.processDownload(room, fileType, data)
+	go s.processDownload(room, fileType, payload.SessionID, data)
 }
 
-func (s *Server) processDownload(room, fileType string, data downloadEventData) {
+func (s *Server) processDownload(room, fileType, sessionID string, data downloadEventData) {
 	filename := buildFilename(room, fileType, data)
 	logger := s.logger.With("room", room, "file_type", fileType, "filename", filename)
 
@@ -195,7 +208,12 @@ func (s *Server) processDownload(room, fileType string, data downloadEventData) 
 		return
 	}
 
-	// Upload with exponential backoff retry.
+	// Route by file type. Recordings go to Cloudflare Stream (#6); transcripts
+	// and chat continue to use WebDAV.
+	if fileType == "recording" {
+		s.uploadRecordingWithRetry(localPath, filename, room, sessionID, data)
+		return
+	}
 	s.uploadWithRetry(localPath, filename)
 }
 
@@ -244,6 +262,116 @@ func (s *Server) uploadWithRetry(localPath, filename string) {
 			return
 		}
 	}
+}
+
+// uploadRecordingWithRetry uploads a video file to Cloudflare Stream with
+// exponential backoff retry, mirroring uploadWithRetry. On success it
+// records the upload in recordings.csv, writes a markdown notification to
+// the configured Nextcloud share, and moves the file from download/ to
+// uploaded/. On final failure the file stays in download/ for recovery.
+func (s *Server) uploadRecordingWithRetry(localPath, filename, room, sessionID string, data downloadEventData) {
+	logger := s.logger.With("filename", filename, "room", room, "file_type", "recording")
+
+	delay := time.Duration(0)
+	maxDelay := 24 * time.Hour
+	totalWaited := time.Duration(0)
+
+	for {
+		if delay > 0 {
+			logger.Info("retrying Stream upload", "delay", delay.String(), "total_waited", totalWaited.String())
+			time.Sleep(delay)
+			totalWaited += delay
+		}
+
+		res, err := s.cfg.Stream.Upload(localPath)
+		if err == nil {
+			s.afterRecordingUploadSuccess(logger, localPath, filename, room, sessionID, data, res)
+			return
+		}
+		logger.Error("Stream upload failed", "error", err, "total_waited", totalWaited.String())
+
+		if delay == 0 {
+			delay = 1 * time.Minute
+		} else {
+			delay = delay * 2
+		}
+		if totalWaited+delay > maxDelay {
+			logger.Error("giving up Stream upload after retries — file kept in download dir for manual recovery",
+				"path", localPath, "total_waited", totalWaited.String())
+			return
+		}
+	}
+}
+
+// afterRecordingUploadSuccess does the bookkeeping that turns a successful CF
+// Stream upload into the user-visible artefacts: a row in recordings.csv, a
+// markdown notification PUT to the Nextcloud share, and a move to uploaded/.
+// Any individual post-success step is best-effort and logged on failure; we
+// do not redo the upload because Cloudflare already has the video.
+func (s *Server) afterRecordingUploadSuccess(
+	logger *slog.Logger,
+	localPath, filename, room, sessionID string,
+	data downloadEventData,
+	res *StreamUploadResult,
+) {
+	playbackURL := s.cfg.PlayerBaseURL + res.UID
+	logger.Info("file uploaded to Cloudflare Stream",
+		"uid", res.UID, "playback_url", playbackURL,
+		"scheduled_deletion", res.ScheduledDeletion.UTC().Format(time.RFC3339),
+	)
+
+	// Append a row to recordings.csv.
+	if s.cfg.Recordings != nil {
+		err := s.cfg.Recordings.Append(RecordingLogEntry{
+			Timestamp:         time.Now().UTC(),
+			Room:              room,
+			SessionID:         sessionID,
+			StreamUID:         res.UID,
+			PlaybackURL:       playbackURL,
+			ScheduledDeletion: res.ScheduledDeletion,
+		})
+		if err != nil {
+			logger.Warn("appending recordings.csv row failed", "error", err)
+		}
+	}
+
+	// Build and PUT the markdown notification to Nextcloud.
+	if s.cfg.WebDAV != nil {
+		meta := NotificationMeta{
+			Room:              room,
+			SessionTimestamp:  sessionTimestamp(data),
+			Duration:          time.Duration(data.DurationSec) * time.Second,
+			PlaybackURL:       playbackURL,
+			ScheduledDeletion: res.ScheduledDeletion,
+		}
+		body, err := buildNotificationMarkdown(meta)
+		if err != nil {
+			logger.Warn("rendering notification markdown failed", "error", err)
+		} else {
+			notifName := notificationFilename(meta)
+			if err := s.uploadBytesToWebDAV(body, notifName); err != nil {
+				logger.Warn("notification PUT to Nextcloud failed", "error", err, "filename", notifName)
+			} else {
+				logger.Info("notification document written to Nextcloud", "filename", notifName)
+			}
+		}
+	}
+
+	// Move local file to uploaded/.
+	uploadedPath := filepath.Join(s.uploadedDir(), filename)
+	if moveErr := os.Rename(localPath, uploadedPath); moveErr != nil {
+		logger.Warn("failed to move recording to uploaded dir, removing instead", "error", moveErr)
+		os.Remove(localPath)
+	}
+}
+
+// sessionTimestamp returns the session start time from the webhook data,
+// falling back to "now" when 8x8 omits startTimestamp (issue #2 mitigation).
+func sessionTimestamp(data downloadEventData) time.Time {
+	if data.StartTimestamp > 0 {
+		return time.UnixMilli(data.StartTimestamp).UTC()
+	}
+	return time.Now().UTC()
 }
 
 // PurgeOldUploads removes files older than maxAge from the uploaded directory.
@@ -364,6 +492,45 @@ func (s *Server) downloadToDir(url, filename string) (string, error) {
 
 	f.Close()
 	return destPath, nil
+}
+
+// uploadBytesToWebDAV PUTs an in-memory byte slice to the configured WebDAV
+// destination under the given filename. Used for small artefacts like the
+// per-recording markdown notification document (#6).
+func (s *Server) uploadBytesToWebDAV(body []byte, filename string) error {
+	cfg := s.cfg.WebDAV
+	destDir := strings.TrimRight(cfg.URL, "/") + "/" + strings.TrimLeft(cfg.Path, "/")
+	destFile := destDir + "/" + filename
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	mkcolReq, err := http.NewRequest("MKCOL", destDir, nil)
+	if err != nil {
+		return fmt.Errorf("MKCOL request: %w", err)
+	}
+	mkcolReq.SetBasicAuth(cfg.User, cfg.Password)
+	if mkcolResp, err := client.Do(mkcolReq); err == nil {
+		mkcolResp.Body.Close()
+	}
+
+	putReq, err := http.NewRequest("PUT", destFile, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("PUT request: %w", err)
+	}
+	putReq.SetBasicAuth(cfg.User, cfg.Password)
+	putReq.ContentLength = int64(len(body))
+
+	putResp, err := client.Do(putReq)
+	if err != nil {
+		return fmt.Errorf("PUT failed: %w", err)
+	}
+	defer putResp.Body.Close()
+
+	if putResp.StatusCode < 200 || putResp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(putResp.Body)
+		return fmt.Errorf("PUT returned %d: %s", putResp.StatusCode, string(respBody))
+	}
+	return nil
 }
 
 func (s *Server) uploadToWebDAV(localPath, filename string) error {

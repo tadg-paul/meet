@@ -5,8 +5,9 @@ exec_args: serve
 default-moderator-name: Modymoody
 
 recording:
-    webdav-path: meeting-recordings
+    webdav:
+        path: meeting-recordings
     player-base-url: "https://media.lobb.ie/"
     local-retention-days: 14
     cloudflare:
-       stream-ttl-days: 90
+        stream-ttl-days: 90

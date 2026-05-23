@@ -79,8 +79,62 @@ func postWebhook(t *testing.T, url, body string) *http.Response {
 
 // --- test server helpers ---
 
-func newWebhookTestServer(webdavURL, webdavPath string) *httptest.Server {
+// streamHarness records request shape against the fake CF Stream backend so
+// tests can assert what the meet server sent.
+type streamHarness struct {
+	createCount  atomic.Int32
+	patchCount   atomic.Int32
+	lastMetadata string
+	lastBody     []byte
+	uid          string
+	server       *httptest.Server
+}
+
+// fakeStreamServer mounts a minimal CF Stream TUS shim. POST creates an
+// upload (Location + stream-media-id), PATCH 204s every chunk.
+func fakeStreamServer(t *testing.T) *streamHarness {
+	t.Helper()
+	h := &streamHarness{uid: "test-stream-uid"}
+	h.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			h.createCount.Add(1)
+			h.lastMetadata = r.Header.Get("Upload-Metadata")
+			w.Header().Set("Location", h.server.URL+"/tus/"+h.uid)
+			w.Header().Set("stream-media-id", h.uid)
+			w.WriteHeader(http.StatusCreated)
+		case http.MethodPatch:
+			h.patchCount.Add(1)
+			b, _ := io.ReadAll(r.Body)
+			h.lastBody = append(h.lastBody, b...)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	t.Cleanup(h.server.Close)
+	return h
+}
+
+func newWebhookTestServer(t *testing.T, webdavURL, webdavPath string) *httptest.Server {
+	srv, _ := newWebhookTestServerWithStream(t, webdavURL, webdavPath)
+	return srv
+}
+
+func newWebhookTestServerWithStream(t *testing.T, webdavURL, webdavPath string) (*httptest.Server, *streamHarness) {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	stream := fakeStreamServer(t)
+	streamClient := server.NewStreamClient(server.StreamConfig{
+		AccountID: "test-account",
+		APIToken:  "test-token",
+		TTLDays:   90,
+		APIBase:   stream.server.URL,
+	}, nil)
+	recLog, err := server.NewRecordingsLog(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewRecordingsLog: %v", err)
+	}
 	srv := server.New(server.Config{
 		Addr:    "127.0.0.1:0",
 		BaseURL: "https://meet.lobb.ie",
@@ -91,13 +145,17 @@ func newWebhookTestServer(webdavURL, webdavPath string) *httptest.Server {
 			User:     "testuser",
 			Password: "testpass",
 		},
-		WebhookToken: testWebhookToken,
-		Logger:       logger,
+		Stream:        streamClient,
+		Recordings:    recLog,
+		PlayerBaseURL: "https://media.lobb.ie/",
+		WebhookToken:  testWebhookToken,
+		Logger:        logger,
 	})
-	return httptest.NewServer(srv.Handler())
+	return httptest.NewServer(srv.Handler()), stream
 }
 
-func newWebhookTestServerNoWebDAV() *httptest.Server {
+func newWebhookTestServerNoWebDAV(t *testing.T) *httptest.Server {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	srv := server.New(server.Config{
 		Addr:         "127.0.0.1:0",
@@ -191,7 +249,7 @@ func TestWebhookRecordingUpload_RT1_1(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, &uploadedBody, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-rt11", "vpaas-magic-cookie-test/workshop",
@@ -211,7 +269,9 @@ func TestWebhookRecordingUpload_RT1_1(t *testing.T) {
 	}
 }
 
-// RT-1.2: Recording file at the WebDAV destination has the expected content
+// RT-1.2: After #6, the recording bytes go to Cloudflare Stream, not Nextcloud.
+// What lands in the WebDAV share for a recording is a markdown notification
+// document carrying the playback URL. This test asserts that contract.
 func TestWebhookRecordingContent_RT1_2(t *testing.T) {
 	dlSrv := fakeDownloadServer("the-actual-recording-bytes")
 	defer dlSrv.Close()
@@ -222,7 +282,7 @@ func TestWebhookRecordingContent_RT1_2(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, &uploadedBody, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-rt12", "vpaas-magic-cookie-test/room",
@@ -233,8 +293,11 @@ func TestWebhookRecordingContent_RT1_2(t *testing.T) {
 
 	waitForAtomic(t, &uploadCount, 1, 5)
 
-	if string(uploadedBody) != "the-actual-recording-bytes" {
-		t.Errorf("uploaded body = %q, want %q", string(uploadedBody), "the-actual-recording-bytes")
+	if !strings.Contains(string(uploadedBody), "https://media.lobb.ie/test-stream-uid") {
+		t.Errorf("notification body missing playback URL; got: %q", string(uploadedBody))
+	}
+	if !strings.Contains(string(uploadedBody), "# room — ") {
+		t.Errorf("notification body missing room header; got: %q", string(uploadedBody))
 	}
 }
 
@@ -252,7 +315,7 @@ func TestWebhookTranscriptionUpload_RT1_3(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("TRANSCRIPTION_UPLOADED", "key-rt13", "vpaas-magic-cookie-test/workshop",
@@ -283,7 +346,7 @@ func TestWebhookTranscriptionContent_RT1_4(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, &uploadedBody, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("TRANSCRIPTION_UPLOADED", "key-rt14", "vpaas-magic-cookie-test/room",
@@ -313,7 +376,7 @@ func TestWebhookChatUpload_RT1_5(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("CHAT_UPLOADED", "key-rt15", "vpaas-magic-cookie-test/workshop",
@@ -344,7 +407,7 @@ func TestWebhookChatContent_RT1_6(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, &uploadedBody, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("CHAT_UPLOADED", "key-rt16", "vpaas-magic-cookie-test/room",
@@ -364,7 +427,9 @@ func TestWebhookChatContent_RT1_6(t *testing.T) {
 // AC1.4: Filenames identify room, date, duration, and type
 // ============================================================
 
-// RT-1.7: Recording filename follows {room}_{YYYY-MM-DD}_{HHmm}_{duration}s.mp4
+// RT-1.7: After #6 the per-recording file in the WebDAV share is the
+// markdown notification, named {room}_{YYYY-MM-DD}_{HHmm}_recording.md.
+// The .mp4 itself goes to Cloudflare Stream.
 func TestWebhookRecordingFilename_RT1_7(t *testing.T) {
 	dlSrv := fakeDownloadServer("data")
 	defer dlSrv.Close()
@@ -374,7 +439,7 @@ func TestWebhookRecordingFilename_RT1_7(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	// 1776528000000ms = 2026-04-18T16:00:00Z
@@ -386,7 +451,7 @@ func TestWebhookRecordingFilename_RT1_7(t *testing.T) {
 
 	waitForAtomic(t, &uploadCount, 1, 5)
 
-	expected := "/Recordings/meet/workshop_2026-04-18_1600_300s.mp4"
+	expected := "/Recordings/meet/workshop_2026-04-18_1600_recording.md"
 	if uploadedPath != expected {
 		t.Errorf("upload path = %q, want %q", uploadedPath, expected)
 	}
@@ -402,7 +467,7 @@ func TestWebhookTranscriptionFilename_RT1_8(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("TRANSCRIPTION_UPLOADED", "key-rt18", "vpaas-magic-cookie-test/workshop",
@@ -429,7 +494,7 @@ func TestWebhookChatFilename_RT1_9(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("CHAT_UPLOADED", "key-rt19", "vpaas-magic-cookie-test/workshop",
@@ -456,7 +521,7 @@ func TestWebhookRoomExtraction_RT1_10(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-rt110", "vpaas-magic-cookie-test/my-deep-work-session",
@@ -486,7 +551,7 @@ func TestWebhookDeduplication_RT1_11(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-dedup", "vpaas-magic-cookie-test/room1",
@@ -518,7 +583,7 @@ func TestWebhookDeduplicationRapid_RT1_12(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, &uploadCount)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-rapid", "vpaas-magic-cookie-test/room2",
@@ -552,7 +617,7 @@ func TestWebhookDownloadFailure_RT1_13(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, nil)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-dlfail", "vpaas-magic-cookie-test/room3",
@@ -590,7 +655,7 @@ func TestWebhookUploadFailure_RT1_14(t *testing.T) {
 	}))
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-upfail", "vpaas-magic-cookie-test/room4",
@@ -628,7 +693,7 @@ func TestWebhookRespondsPromptly_RT1_15(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, nil)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-prompt", "vpaas-magic-cookie-test/room5",
@@ -654,7 +719,7 @@ func TestWebhookRespondsPromptly_RT1_15(t *testing.T) {
 
 // RT-1.16: Server starts without WebDAV config
 func TestServerStartsWithoutWebDAV_RT1_16(t *testing.T) {
-	ts := newWebhookTestServerNoWebDAV()
+	ts := newWebhookTestServerNoWebDAV(t)
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/health")
@@ -670,7 +735,7 @@ func TestServerStartsWithoutWebDAV_RT1_16(t *testing.T) {
 
 // RT-1.17: Webhook endpoint returns an appropriate error when WebDAV is not configured
 func TestWebhookReturns503WithoutWebDAV_RT1_17(t *testing.T) {
-	ts := newWebhookTestServerNoWebDAV()
+	ts := newWebhookTestServerNoWebDAV(t)
 	defer ts.Close()
 
 	body := webhookPayload("RECORDING_UPLOADED", "key-nowebdav", "vpaas-magic-cookie-test/room",
@@ -697,7 +762,7 @@ func TestWebhookValidAuth_RT1_18(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, nil)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := nonDownloadPayload("ROOM_CREATED", "key-auth-ok", "vpaas-magic-cookie-test/room")
@@ -725,7 +790,7 @@ func TestWebhookMissingAuth_RT1_19(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, nil)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := nonDownloadPayload("ROOM_CREATED", "key-noauth", "vpaas-magic-cookie-test/room")
@@ -751,7 +816,7 @@ func TestWebhookWrongAuth_RT1_20(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, nil)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := nonDownloadPayload("ROOM_CREATED", "key-badauth", "vpaas-magic-cookie-test/room")
@@ -787,7 +852,7 @@ func TestWebhookNonDownloadEventLogged_RT1_22(t *testing.T) {
 	davSrv := fakeWebDAVServer(&uploadedPath, nil, nil)
 	defer davSrv.Close()
 
-	ts := newWebhookTestServer(davSrv.URL, "/Recordings/meet")
+	ts := newWebhookTestServer(t, davSrv.URL, "/Recordings/meet")
 	defer ts.Close()
 
 	body := nonDownloadPayload("PARTICIPANT_JOINED", "key-pj", "vpaas-magic-cookie-test/room")
