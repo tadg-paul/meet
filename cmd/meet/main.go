@@ -58,6 +58,15 @@ func main() {
 		case "token":
 			runToken(os.Args[2:])
 			return
+		case "create":
+			runCreate(os.Args[2:])
+			return
+		case "cancel":
+			runCancel(os.Args[2:])
+			return
+		case "list":
+			runList(os.Args[2:])
+			return
 		case "-h", "--help":
 			printUsage()
 			os.Exit(0)
@@ -73,8 +82,11 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: meet <command> [options]")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  serve   Start the web server (default)")
-	fmt.Fprintln(os.Stderr, "  token   Generate a moderator JWT URL for a room")
+	fmt.Fprintln(os.Stderr, "  serve    Start the web server (default)")
+	fmt.Fprintln(os.Stderr, "  token    Generate a moderator JWT URL for a room")
+	fmt.Fprintln(os.Stderr, "  create   Register a meeting room with a start/end window")
+	fmt.Fprintln(os.Stderr, "  cancel   Cancel a registered meeting room")
+	fmt.Fprintln(os.Stderr, "  list     List registered meeting rooms")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Flags:")
 	fmt.Fprintln(os.Stderr, "  -h, --help      Show this help")
@@ -134,6 +146,27 @@ func runServe(args []string) {
 		dataDir = "."
 	}
 
+	// Open the rooms registry. handleRoom consults this to gate every
+	// request; without it, the gate is bypassed and any path serves the
+	// meeting page.
+	rooms, err := server.NewRoomsLog(dataDir)
+	if err != nil {
+		logger.Error("opening rooms registry", "error", err)
+		os.Exit(1)
+	}
+
+	// Parse the 8x8 public key for moderator-JWT verification at the gate.
+	// Optional: if absent, JWT bypass is disabled but the registry still works.
+	var pubKey *rsa.PublicKey
+	if cfg.Keys8x8.PublicKey != "" {
+		parsed, err := parsePublicKey(cfg.Keys8x8.PublicKey)
+		if err != nil {
+			logger.Error("parsing public key — JWT bypass disabled", "error", err)
+		} else {
+			pubKey = parsed
+		}
+	}
+
 	srvCfg := server.Config{
 		Addr:         cfg.Addr,
 		BaseURL:      cfg.BaseURL,
@@ -142,6 +175,8 @@ func runServe(args []string) {
 		DataDir:      dataDir,
 		WebhookToken: cfg.Recording.WebhookToken,
 		Logger:       logger,
+		Rooms:        rooms,
+		JWTPublicKey: pubKey,
 	}
 
 	if cfg.Recording.WebDAVURL != "" {
@@ -277,6 +312,28 @@ func runToken(args []string) {
 	fmt.Printf("%s/%s?jwt=%s\n", cfg.BaseURL, *roomFlag, signed)
 }
 
+// parsePublicKey decodes a PEM-encoded RSA public key. Used by the registry
+// gate to verify moderator-bypass JWTs at request time.
+func parsePublicKey(pemStr string) (*rsa.PublicKey, error) {
+	block, _ := pem.Decode([]byte(pemStr))
+	if block == nil {
+		return nil, fmt.Errorf("public-key: failed to decode PEM block")
+	}
+	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		// Try the legacy PKCS#1 form as a fallback.
+		if rsaKey, rerr := x509.ParsePKCS1PublicKey(block.Bytes); rerr == nil {
+			return rsaKey, nil
+		}
+		return nil, fmt.Errorf("public-key: parse failed: %w", err)
+	}
+	rsaKey, ok := parsed.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("public-key: not an RSA key")
+	}
+	return rsaKey, nil
+}
+
 func parsePrivateKey(pemStr string) *rsa.PrivateKey {
 	block, _ := pem.Decode([]byte(pemStr))
 	if block == nil {
@@ -294,6 +351,155 @@ func parsePrivateKey(pemStr string) *rsa.PrivateKey {
 		os.Exit(1)
 	}
 	return rsaKey
+}
+
+// runCreate registers a new meeting room with a start/end window.
+func runCreate(args []string) {
+	fs := flag.NewFlagSet("create", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: meet create --room <name> --from <ts> --until <ts> [--note ...]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Register a meeting room. The URL becomes joinable from --from until --until")
+		fmt.Fprintln(os.Stderr, "for guests; moderator-JWT visits bypass the window.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Timestamps are RFC3339 (e.g. 2026-05-22T19:00:00Z).")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Options:")
+		fs.PrintDefaults()
+	}
+	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
+	roomFlag := fs.String("room", "", "room name (required)")
+	fromFlag := fs.String("from", "", "valid-from time, RFC3339 (required)")
+	untilFlag := fs.String("until", "", "valid-until time, RFC3339 (required)")
+	noteFlag := fs.String("note", "", "free-form note")
+	fs.Parse(args)
+
+	if *roomFlag == "" || *fromFlag == "" || *untilFlag == "" {
+		fs.Usage()
+		os.Exit(2)
+	}
+	from, err := time.Parse(time.RFC3339, *fromFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: --from: %v\n", err)
+		os.Exit(2)
+	}
+	until, err := time.Parse(time.RFC3339, *untilFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: --until: %v\n", err)
+		os.Exit(2)
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	configPaths := *configFlag
+	if configPaths == "" {
+		configPaths = buildConfigPaths()
+	}
+	_ = loadConfig(configPaths, logger) // exercise the cascade even if we only need dataDir
+
+	rooms, err := server.NewRoomsLog(stateDir())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: opening rooms registry: %v\n", err)
+		os.Exit(1)
+	}
+	if err := server.CreateRoom(rooms, *roomFlag, from, until, *noteFlag, time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("created %s [%s .. %s]\n",
+		*roomFlag, from.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339))
+}
+
+// runCancel cancels a previously-registered room.
+func runCancel(args []string) {
+	fs := flag.NewFlagSet("cancel", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: meet cancel --room <name> [--note ...]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Cancel a registered meeting room. After cancellation the URL is no longer")
+		fmt.Fprintln(os.Stderr, "joinable, even within its original time window.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Options:")
+		fs.PrintDefaults()
+	}
+	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
+	roomFlag := fs.String("room", "", "room name (required)")
+	noteFlag := fs.String("note", "", "free-form note")
+	fs.Parse(args)
+
+	if *roomFlag == "" {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	configPaths := *configFlag
+	if configPaths == "" {
+		configPaths = buildConfigPaths()
+	}
+	_ = loadConfig(configPaths, logger)
+
+	rooms, err := server.NewRoomsLog(stateDir())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: opening rooms registry: %v\n", err)
+		os.Exit(1)
+	}
+	if err := server.CancelRoom(rooms, *roomFlag, *noteFlag, time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("cancelled %s\n", *roomFlag)
+}
+
+// runList prints registered rooms filtered by status.
+func runList(args []string) {
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: meet list [--filter all|active|upcoming|past|cancelled]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Options:")
+		fs.PrintDefaults()
+	}
+	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
+	filterFlag := fs.String("filter", "all", "all | active | upcoming | past | cancelled")
+	fs.Parse(args)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	configPaths := *configFlag
+	if configPaths == "" {
+		configPaths = buildConfigPaths()
+	}
+	_ = loadConfig(configPaths, logger)
+
+	rooms, err := server.NewRoomsLog(stateDir())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: opening rooms registry: %v\n", err)
+		os.Exit(1)
+	}
+	entries, err := server.ListRooms(rooms, server.RoomFilter(*filterFlag), time.Now())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	for _, e := range entries {
+		from := "-"
+		until := "-"
+		if !e.ValidFrom.IsZero() {
+			from = e.ValidFrom.UTC().Format(time.RFC3339)
+		}
+		if !e.ValidUntil.IsZero() {
+			until = e.ValidUntil.UTC().Format(time.RFC3339)
+		}
+		fmt.Printf("%-30s  %-10s  %s  ..  %s  %s\n", e.Room, e.Status, from, until, e.Note)
+	}
+}
+
+// stateDir returns the directory the rooms registry (and other state files)
+// live in. Mirrors the convention used by runServe.
+func stateDir() string {
+	if d := os.Getenv("STATE_DIRECTORY"); d != "" {
+		return d
+	}
+	return "."
 }
 
 // buildConfigPaths builds the config file chain from environment

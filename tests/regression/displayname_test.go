@@ -12,12 +12,12 @@ import (
 	"testing"
 )
 
-// TestMeetingPageDisplayNameOverride_NoJWT verifies the served meeting page
-// for a guest (no JWT) passes an explicit empty userInfo.displayName to the
-// JitsiMeetExternalAPI constructor. Without this override, JaaS may default
-// to the API-key owner's display name, leaking the operator's identity to
-// every visitor (see issue #5).
-func TestMeetingPageDisplayNameOverride_NoJWT(t *testing.T) {
+// RT-5.1 — TestMeetingPageDisplayNameOverride_NoJWT_RT5_1 verifies the
+// served meeting page for a guest (no JWT) passes an explicit empty
+// userInfo.displayName to the JitsiMeetExternalAPI constructor. Without
+// this override, JaaS may default to the API-key owner's display name,
+// leaking the operator's identity to every visitor (see issue #5).
+func TestMeetingPageDisplayNameOverride_NoJWT_RT5_1(t *testing.T) {
 	ts := newTestServer()
 	defer ts.Close()
 
@@ -28,12 +28,12 @@ func TestMeetingPageDisplayNameOverride_NoJWT(t *testing.T) {
 	}
 }
 
-// TestMeetingPageDisplayNameOverride_WithJWT verifies the same override
-// applies to JWT-bearing (moderator) visits. The moderator's JWT carries
-// their preferred display name; the page must still explicitly clear
-// the userInfo.displayName option so JaaS does not also inject an
+// RT-5.2 — TestMeetingPageDisplayNameOverride_WithJWT_RT5_2 verifies the
+// same override applies to JWT-bearing (moderator) visits. The moderator's
+// JWT carries their preferred display name; the page must still explicitly
+// clear the userInfo.displayName option so JaaS does not also inject an
 // account-side default for guests sharing the same room.
-func TestMeetingPageDisplayNameOverride_WithJWT(t *testing.T) {
+func TestMeetingPageDisplayNameOverride_WithJWT_RT5_2(t *testing.T) {
 	ts := newTestServer()
 	defer ts.Close()
 

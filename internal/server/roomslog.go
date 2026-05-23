@@ -189,6 +189,96 @@ func formatOptional(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
+// CreateRoom appends a "created" entry for the given room. Returns an error
+// if the inputs are not internally consistent (empty room, from >= until).
+// Does not check whether the room is already registered — the registry is
+// last-row-wins, so multiple creates simply overwrite earlier state.
+func CreateRoom(log *RoomsLog, room string, from, until time.Time, note string, now time.Time) error {
+	if room == "" {
+		return fmt.Errorf("room name is required")
+	}
+	if !from.Before(until) {
+		return fmt.Errorf("--from (%s) must be before --until (%s)",
+			from.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339))
+	}
+	return log.Append(RoomLogEntry{
+		Timestamp:  now,
+		Room:       room,
+		Status:     RoomCreated,
+		ValidFrom:  from,
+		ValidUntil: until,
+		Note:       note,
+	})
+}
+
+// CancelRoom appends a "cancelled" entry. Returns an error if the room has
+// never been registered (you cannot cancel something that doesn't exist).
+func CancelRoom(log *RoomsLog, room string, note string, now time.Time) error {
+	if room == "" {
+		return fmt.Errorf("room name is required")
+	}
+	if log.LatestByRoom(room) == nil {
+		return fmt.Errorf("room %q is not registered", room)
+	}
+	return log.Append(RoomLogEntry{
+		Timestamp: now,
+		Room:      room,
+		Status:    RoomCancelled,
+		Note:      note,
+	})
+}
+
+// RoomFilter narrows the output of ListRooms.
+type RoomFilter string
+
+const (
+	FilterAll       RoomFilter = "all"
+	FilterActive    RoomFilter = "active"
+	FilterUpcoming  RoomFilter = "upcoming"
+	FilterPast      RoomFilter = "past"
+	FilterCancelled RoomFilter = "cancelled"
+)
+
+// ListRooms returns rooms matching the given filter, with one entry per room
+// reflecting that room's latest state.
+//
+//   - active:    latest=created and now ∈ [valid_from, valid_until]
+//   - upcoming:  latest=created and now < valid_from
+//   - past:      latest=created and now > valid_until
+//   - cancelled: latest=cancelled (regardless of window)
+//   - all:       every room
+func ListRooms(log *RoomsLog, filter RoomFilter, now time.Time) ([]RoomLogEntry, error) {
+	all, err := log.All()
+	if err != nil {
+		return nil, err
+	}
+	if filter == "" || filter == FilterAll {
+		return all, nil
+	}
+	out := make([]RoomLogEntry, 0, len(all))
+	for _, e := range all {
+		if matchesFilter(e, filter, now) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func matchesFilter(e RoomLogEntry, filter RoomFilter, now time.Time) bool {
+	switch filter {
+	case FilterCancelled:
+		return e.Status == RoomCancelled
+	case FilterActive:
+		return e.Status == RoomCreated &&
+			!now.Before(e.ValidFrom) && !now.After(e.ValidUntil)
+	case FilterUpcoming:
+		return e.Status == RoomCreated && now.Before(e.ValidFrom)
+	case FilterPast:
+		return e.Status == RoomCreated && now.After(e.ValidUntil)
+	}
+	return false
+}
+
 func decodeEntry(rec []string) (RoomLogEntry, bool) {
 	if len(rec) < 3 {
 		return RoomLogEntry{}, false

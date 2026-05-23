@@ -129,7 +129,7 @@ func bodyIsMeetingPage(body string) bool {
 }
 
 // AC7.1 — unregistered room: not a meeting page, status != 200.
-func TestGate_UnregisteredRoom_NoMeetingPage(t *testing.T) {
+func TestGate_UnregisteredRoom_NoMeetingPage_RT7_1(t *testing.T) {
 	f := newGateFixture(t)
 
 	status, body := f.get(t, "/never-registered-room")
@@ -143,7 +143,7 @@ func TestGate_UnregisteredRoom_NoMeetingPage(t *testing.T) {
 }
 
 // AC7.1 — unregistered room: no JaaS roomName, no AppID embedded.
-func TestGate_UnregisteredRoom_NoJaaSPayload(t *testing.T) {
+func TestGate_UnregisteredRoom_NoJaaSPayload_RT7_2(t *testing.T) {
 	f := newGateFixture(t)
 
 	_, body := f.get(t, "/some-random-name")
@@ -157,7 +157,7 @@ func TestGate_UnregisteredRoom_NoJaaSPayload(t *testing.T) {
 }
 
 // AC7.2 — registered, before its window: no meeting page.
-func TestGate_BeforeWindow(t *testing.T) {
+func TestGate_BeforeWindow_RT7_3(t *testing.T) {
 	f := newGateFixture(t)
 	f.registerRoom(t, "foo",
 		mustRFC3339(t, "2026-05-22T21:00:00Z"),
@@ -174,7 +174,7 @@ func TestGate_BeforeWindow(t *testing.T) {
 }
 
 // AC7.2 — registered, during its window: meeting page returns.
-func TestGate_DuringWindow(t *testing.T) {
+func TestGate_DuringWindow_RT7_4(t *testing.T) {
 	f := newGateFixture(t)
 	f.registerRoom(t, "foo",
 		mustRFC3339(t, "2026-05-22T19:00:00Z"),
@@ -190,7 +190,7 @@ func TestGate_DuringWindow(t *testing.T) {
 }
 
 // AC7.2 — registered, after its window: no meeting page.
-func TestGate_AfterWindow(t *testing.T) {
+func TestGate_AfterWindow_RT7_5(t *testing.T) {
 	f := newGateFixture(t)
 	f.registerRoom(t, "foo",
 		mustRFC3339(t, "2026-05-22T18:00:00Z"),
@@ -206,7 +206,7 @@ func TestGate_AfterWindow(t *testing.T) {
 }
 
 // AC7.2 boundary — at exactly valid_from: meeting page returns (inclusive).
-func TestGate_AtValidFromBoundary(t *testing.T) {
+func TestGate_AtValidFromBoundary_RT7_6(t *testing.T) {
 	f := newGateFixture(t)
 	f.registerRoom(t, "foo", f.now, f.now.Add(time.Hour))
 	status, _ := f.get(t, "/foo")
@@ -216,7 +216,7 @@ func TestGate_AtValidFromBoundary(t *testing.T) {
 }
 
 // AC7.2 boundary — at exactly valid_until: meeting page returns (inclusive).
-func TestGate_AtValidUntilBoundary(t *testing.T) {
+func TestGate_AtValidUntilBoundary_RT7_7(t *testing.T) {
 	f := newGateFixture(t)
 	f.registerRoom(t, "foo", f.now.Add(-time.Hour), f.now)
 	status, _ := f.get(t, "/foo")
@@ -227,7 +227,7 @@ func TestGate_AtValidUntilBoundary(t *testing.T) {
 
 // AC7.4 + AC7.2 — registered then cancelled, still inside its original window:
 // no meeting page.
-func TestGate_CancelledRoom_NoMeetingPage(t *testing.T) {
+func TestGate_CancelledRoom_NoMeetingPage_RT7_13(t *testing.T) {
 	f := newGateFixture(t)
 	f.registerRoom(t, "foo",
 		mustRFC3339(t, "2026-05-22T19:00:00Z"),
@@ -244,7 +244,7 @@ func TestGate_CancelledRoom_NoMeetingPage(t *testing.T) {
 }
 
 // AC7.6 — valid moderator JWT on unregistered room: meeting page returns.
-func TestGate_ModeratorJWT_UnregisteredRoom(t *testing.T) {
+func TestGate_ModeratorJWT_UnregisteredRoom_RT7_19(t *testing.T) {
 	f := newGateFixture(t)
 	jwtStr := f.moderatorJWT(t)
 	status, body := f.get(t, "/never-heard-of-this-room?jwt="+jwtStr)
@@ -257,7 +257,7 @@ func TestGate_ModeratorJWT_UnregisteredRoom(t *testing.T) {
 }
 
 // AC7.6 — valid moderator JWT on cancelled room: meeting page returns.
-func TestGate_ModeratorJWT_CancelledRoom(t *testing.T) {
+func TestGate_ModeratorJWT_CancelledRoom_RT7_20(t *testing.T) {
 	f := newGateFixture(t)
 	f.registerRoom(t, "foo",
 		mustRFC3339(t, "2026-05-22T19:00:00Z"),
@@ -272,7 +272,7 @@ func TestGate_ModeratorJWT_CancelledRoom(t *testing.T) {
 }
 
 // AC7.6 — valid moderator JWT outside the room's window: meeting page returns.
-func TestGate_ModeratorJWT_OutOfWindow(t *testing.T) {
+func TestGate_ModeratorJWT_OutOfWindow_RT7_21(t *testing.T) {
 	f := newGateFixture(t)
 	f.registerRoom(t, "foo",
 		mustRFC3339(t, "2026-05-22T18:00:00Z"),
@@ -286,7 +286,7 @@ func TestGate_ModeratorJWT_OutOfWindow(t *testing.T) {
 }
 
 // AC7.6 (negative) — garbage JWT is treated as no JWT.
-func TestGate_InvalidJWT_TreatedAsNoJWT(t *testing.T) {
+func TestGate_InvalidJWT_TreatedAsNoJWT_RT7_22(t *testing.T) {
 	f := newGateFixture(t)
 	// Unregistered room + invalid JWT → not allowed.
 	status, _ := f.get(t, "/unregistered?jwt=this.is.not.a.real.jwt")
@@ -296,7 +296,7 @@ func TestGate_InvalidJWT_TreatedAsNoJWT(t *testing.T) {
 }
 
 // AC7.6 (negative) — JWT signed by the wrong key is rejected.
-func TestGate_WrongKeyJWT_Rejected(t *testing.T) {
+func TestGate_WrongKeyJWT_Rejected_RT7_25(t *testing.T) {
 	f := newGateFixture(t)
 	other, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -322,7 +322,7 @@ func TestGate_WrongKeyJWT_Rejected(t *testing.T) {
 }
 
 // AC7.6 (negative) — non-moderator JWT is rejected for bypass.
-func TestGate_NonModeratorJWT_Rejected(t *testing.T) {
+func TestGate_NonModeratorJWT_Rejected_RT7_26(t *testing.T) {
 	f := newGateFixture(t)
 	now := time.Now()
 	claims := jwt.MapClaims{
@@ -344,7 +344,7 @@ func TestGate_NonModeratorJWT_Rejected(t *testing.T) {
 }
 
 // "/" with empty path and no JWT: 404 — no implicit default room (#7 drops it).
-func TestGate_RootPathRejected(t *testing.T) {
+func TestGate_RootPathRejected_RT7_27(t *testing.T) {
 	f := newGateFixture(t)
 	status, _ := f.get(t, "/")
 	if status == http.StatusOK {
