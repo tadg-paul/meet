@@ -5,7 +5,9 @@ package server
 
 import (
 	"context"
+	"crypto/rsa"
 	"embed"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -13,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 //go:embed all:static
@@ -31,6 +35,16 @@ type Config struct {
 	WebDAV       *WebDAVConfig
 	WebhookToken string
 	Logger       *slog.Logger
+	// Rooms is the registry consulted by handleRoom. When non-nil, every
+	// request to /<room> is gated against this registry (#7). When nil, the
+	// gate is disabled and any room name loads the meeting page (legacy).
+	Rooms *RoomsLog
+	// JWTPublicKey verifies the optional ?jwt= query parameter for the
+	// moderator bypass. Nil disables JWT bypass entirely.
+	JWTPublicKey *rsa.PublicKey
+	// Now returns the current time. Defaults to time.Now in New. Tests
+	// inject a controllable clock here.
+	Now func() time.Time
 }
 
 // Server wraps net/http.Server with meet-specific routing.
@@ -40,6 +54,7 @@ type Server struct {
 	tmpl   *template.Template
 	logger *slog.Logger
 	dedup  *deduplicator
+	now    func() time.Time
 }
 
 type pageData struct {
@@ -54,11 +69,16 @@ type pageData struct {
 func New(cfg Config) *Server {
 	tmpl := template.Must(template.New("index").Parse(indexHTML))
 
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	s := &Server{
 		cfg:    cfg,
 		tmpl:   tmpl,
 		logger: cfg.Logger,
 		dedup:  newDeduplicator(1000),
+		now:    now,
 	}
 
 	mux := http.NewServeMux()
@@ -135,6 +155,14 @@ func (s *Server) handleRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Registry gate (#7). A non-empty path must either be a registered room
+	// inside its valid window, or be accompanied by a valid moderator JWT.
+	// Empty path with no registry-bypass is also rejected.
+	if !s.gateAllows(path, r) {
+		http.NotFound(w, r)
+		return
+	}
+
 	domainFull, domainFirst, domainRest := parseDomain(s.cfg.BaseURL)
 
 	data := pageData{
@@ -171,4 +199,79 @@ func parseDomain(baseURL string) (full, first, rest string) {
 	first = host[:dot]
 	rest = host[dot:]
 	return full, first, rest
+}
+
+// gateAllows reports whether the given room path should load the meeting page.
+//
+// Rules:
+//   - A valid moderator JWT in the request bypasses every check.
+//   - Without a JWT, the room must exist in the registry, be in the "created"
+//     state, and the current time must fall within [valid_from, valid_until]
+//     inclusive.
+//   - If the server was constructed without a RoomsLog (Config.Rooms == nil),
+//     the gate is disabled and every non-empty path is allowed; the empty
+//     path is rejected. This preserves the original "no gating" path for any
+//     caller that has not opted in.
+func (s *Server) gateAllows(path string, r *http.Request) bool {
+	if s.hasValidModeratorJWT(r) {
+		return true
+	}
+	if path == "" {
+		return false
+	}
+	if s.cfg.Rooms == nil {
+		// Registry not wired (legacy / test setups). Any non-empty room loads.
+		return true
+	}
+	entry := s.cfg.Rooms.LatestByRoom(path)
+	if entry == nil || entry.Status != RoomCreated {
+		return false
+	}
+	now := s.now()
+	if now.Before(entry.ValidFrom) || now.After(entry.ValidUntil) {
+		return false
+	}
+	return true
+}
+
+// hasValidModeratorJWT returns true when the request carries a ?jwt= query
+// parameter whose token verifies against the configured public key and
+// asserts moderator=true. Any failure path returns false (treated as no JWT).
+func (s *Server) hasValidModeratorJWT(r *http.Request) bool {
+	tokenStr := r.URL.Query().Get("jwt")
+	if tokenStr == "" {
+		return false
+	}
+	if s.cfg.JWTPublicKey == nil {
+		return false
+	}
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return s.cfg.JWTPublicKey, nil
+	})
+	if err != nil || token == nil || !token.Valid {
+		return false
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return false
+	}
+	ctx, ok := claims["context"].(map[string]any)
+	if !ok {
+		return false
+	}
+	user, ok := ctx["user"].(map[string]any)
+	if !ok {
+		return false
+	}
+	// 8x8 JWTs use the string "true" for moderator (per docs/8x8-embed.md).
+	switch v := user["moderator"].(type) {
+	case string:
+		return v == "true"
+	case bool:
+		return v
+	}
+	return false
 }
