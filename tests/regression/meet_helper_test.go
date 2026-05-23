@@ -30,6 +30,20 @@ func ensureMeetHelperBin(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	repoRoot := filepath.Clean(filepath.Join(cwd, "..", ".."))
+
+	// Stage the help-text source into the binary's package dir so Go's
+	// //go:embed directive can reach it. The Makefile build target does
+	// this; we replicate it here so `go test` works standalone.
+	helpSrc := filepath.Join(repoRoot, "docs", "help", "meet-helper.txt")
+	helpDst := filepath.Join(repoRoot, "cmd", "meet-helper", "help.txt")
+	helpData, err := os.ReadFile(helpSrc)
+	if err != nil {
+		t.Fatalf("read help source %s: %v", helpSrc, err)
+	}
+	if err := os.WriteFile(helpDst, helpData, 0o644); err != nil {
+		t.Fatalf("stage help.txt: %v", err)
+	}
+
 	out := filepath.Join(repoRoot, "bin", "meet-helper-test")
 	cmd := exec.Command("go", "build", "-o", out, "./cmd/meet-helper")
 	cmd.Dir = repoRoot
@@ -243,16 +257,26 @@ func TestHelper_NoArgs_ExitsNonZero_RT8_9(t *testing.T) {
 	}
 }
 
-// AC8.4 — -h and --help print help and exit zero.
+// AC8.4 — -h and --help print local help and exit zero, whether they appear
+// in position 0 (`meet-helper -h`) or position 1 (`meet-helper host -h`).
+// Once a subcommand is named, the flag is forwarded to the remote — that
+// path is not exercised here because it requires opening a real SSH
+// connection.
 func TestHelper_HelpFlags_ExitZero_RT8_10(t *testing.T) {
-	for _, flag := range []string{"-h", "--help"} {
-		t.Run(flag, func(t *testing.T) {
-			stdout, _, code := runHelper(t, flag)
+	cases := [][]string{
+		{"-h"},
+		{"--help"},
+		{"some-host", "-h"},
+		{"some-host", "--help"},
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stdout, _, code := runHelper(t, args...)
 			if code != 0 {
-				t.Errorf("%s: exit=%d, want 0", flag, code)
+				t.Errorf("%v: exit=%d, want 0", args, code)
 			}
 			if !strings.Contains(stdout, "Usage:") {
-				t.Errorf("%s: stdout missing usage line: %q", flag, stdout)
+				t.Errorf("%v: stdout missing usage line: %q", args, stdout)
 			}
 		})
 	}
@@ -263,5 +287,26 @@ func TestHelper_HostOnly_ExitsNonZero_RT8_11(t *testing.T) {
 	_, _, code := runHelper(t, "some-host")
 	if code == 0 {
 		t.Errorf("host-only exit=0, want non-zero")
+	}
+}
+
+// AC8.3 / centralised docs — the help text printed by meet-helper is the
+// byte-for-byte content of docs/help/meet-helper.txt, not a hardcoded copy
+// in Go source. Catches regressions where help drifts back into source.
+func TestHelper_HelpTextSourcedFromDocs_RT8_12(t *testing.T) {
+	cwd, _ := os.Getwd()
+	repoRoot := filepath.Clean(filepath.Join(cwd, "..", ".."))
+	docSrc, err := os.ReadFile(filepath.Join(repoRoot, "docs", "help", "meet-helper.txt"))
+	if err != nil {
+		t.Fatalf("read docs source: %v", err)
+	}
+
+	stdout, _, code := runHelper(t, "-h")
+	if code != 0 {
+		t.Fatalf("-h exit=%d", code)
+	}
+	if stdout != string(docSrc) {
+		t.Errorf("help output diverges from docs/help/meet-helper.txt\n--- docs ---\n%s\n--- output ---\n%s",
+			string(docSrc), stdout)
 	}
 }

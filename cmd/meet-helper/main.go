@@ -4,6 +4,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,15 +12,29 @@ import (
 	"github.com/tadg-paul/meet/internal/sshshim"
 )
 
+// helpText is copied from docs/help/meet-helper.txt by the Makefile build
+// target. Editing the inline copy here is unsupported — edit the docs
+// source and rebuild.
+//
+//go:embed help.txt
+var helpText string
+
 // Version is the build identifier, overridden at link time.
 var Version = "dev"
 
 func main() {
 	args := os.Args[1:]
 
-	// Handle version + help before positional parsing.
-	if len(args) >= 1 {
-		switch args[0] {
+	// Local help / version recognition: -h, --help, --version are
+	// handled locally when they appear before a subcommand has been
+	// named (positions 0 or 1). Once a subcommand has been named, any
+	// further -h is forwarded to the remote subcommand so callers can
+	// reach `meet token -h`, `meet create -h`, etc.
+	for i, a := range args {
+		if i > 1 {
+			break
+		}
+		switch a {
 		case "--version", "-version":
 			fmt.Println(Version)
 			os.Exit(0)
@@ -54,19 +69,5 @@ func main() {
 }
 
 func printUsage(out *os.File) {
-	fmt.Fprintln(out, "Usage: meet-helper <host> <subcommand> [args...]")
-	fmt.Fprintln(out, "")
-	fmt.Fprintln(out, "Invoke any meet subcommand on a remote deploy host via SSH. The")
-	fmt.Fprintln(out, "config cascade (defaults.yaml + per-host config + secrets) is supplied")
-	fmt.Fprintln(out, "automatically using the deploy convention.")
-	fmt.Fprintln(out, "")
-	fmt.Fprintln(out, "Examples:")
-	fmt.Fprintln(out, "  meet-helper light-hugger token --room workshop-april")
-	fmt.Fprintln(out, "  meet-helper light-hugger create --room demo \\")
-	fmt.Fprintln(out, "    --from 2026-05-25T19:00:00Z --until 2026-05-25T21:00:00Z")
-	fmt.Fprintln(out, "  meet-helper light-hugger list --filter active")
-	fmt.Fprintln(out, "  meet-helper light-hugger cancel --room demo")
-	fmt.Fprintln(out, "")
-	fmt.Fprintln(out, "The host must have meet deployed at /srv/meet/meet with config and")
-	fmt.Fprintln(out, "secrets at the standard paths.")
+	fmt.Fprint(out, helpText)
 }

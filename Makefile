@@ -11,14 +11,21 @@ SECRETS_PATH := secrets/localhost.yaml
 
 .PHONY: build test test-one-off lint clean install uninstall init serve sync release
 
-build:
+build: stage-help-text
 	@echo "==> building $(APP) for $$(go env GOOS)/$$(go env GOARCH)"
 	@mkdir -p $(dir $(BUILD_OUTPUT))
 	go build -o $(BUILD_OUTPUT) $(MAIN_PKG)
 	go build -o ./bin/meet-helper ./cmd/meet-helper
 	@ls -la $(BUILD_OUTPUT) ./bin/meet-helper
 
-test: lint
+# stage-help-text copies the canonical help-text sources from docs/help/ into
+# each binary's package directory where Go's embed directive can reach them.
+# The staged copies are gitignored; edit docs/help/<binary>.txt and rebuild.
+.PHONY: stage-help-text
+stage-help-text:
+	@cp docs/help/meet-helper.txt cmd/meet-helper/help.txt
+
+test: stage-help-text lint
 	@echo "==> running regression tests"
 	@if ! find tests/regression -name '*_test.go' -print -quit 2>/dev/null | grep -q .; then \
 	  echo "WARNING: no regression tests found in tests/regression/"; \
@@ -33,7 +40,7 @@ else
 	go test ./tests/one_off/... -v
 endif
 
-lint:
+lint: stage-help-text
 	@echo "==> linting"
 	go vet ./...
 
