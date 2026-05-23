@@ -30,7 +30,6 @@ type Config struct {
 	Addr         string
 	BaseURL      string
 	AppID        string
-	DefaultRoom  string
 	DataDir      string
 	WebDAV       *WebDAVConfig
 	WebhookToken string
@@ -144,10 +143,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRoom(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	path = strings.TrimSuffix(path, "/")
-
-	if path == "" {
-		path = s.cfg.DefaultRoom
-	}
 
 	// Reject paths with slashes (only single-segment room names).
 	if strings.Contains(path, "/") {

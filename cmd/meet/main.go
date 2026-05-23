@@ -26,12 +26,11 @@ import (
 var Version = "dev"
 
 type appConfig struct {
-	Addr          string    `yaml:"addr"`
-	BaseURL       string    `yaml:"base_url"`
-	DefaultRoom   string    `yaml:"default_room"`
+	Addr                 string    `yaml:"addr"`
+	BaseURL              string    `yaml:"base_url"`
 	DefaultModeratorName string    `yaml:"default-moderator-name"`
-	Keys8x8       keys8x8   `yaml:"8x8-keys"`
-	Recording     recording `yaml:"recording"`
+	Keys8x8              keys8x8   `yaml:"8x8-keys"`
+	Recording            recording `yaml:"recording"`
 }
 
 type recording struct {
@@ -171,7 +170,6 @@ func runServe(args []string) {
 		Addr:         cfg.Addr,
 		BaseURL:      cfg.BaseURL,
 		AppID:        cfg.Keys8x8.AppID,
-		DefaultRoom:  cfg.DefaultRoom,
 		DataDir:      dataDir,
 		WebhookToken: cfg.Recording.WebhookToken,
 		Logger:       logger,
@@ -520,8 +518,7 @@ func buildConfigPaths() string {
 
 func loadConfig(paths string, logger *slog.Logger) appConfig {
 	cfg := appConfig{
-		Addr:        "127.0.0.1:18085",
-		DefaultRoom: "lobby",
+		Addr: "127.0.0.1:18085",
 	}
 
 	for _, p := range strings.Split(paths, ",") {

@@ -82,10 +82,9 @@ func postWebhook(t *testing.T, url, body string) *http.Response {
 func newWebhookTestServer(webdavURL, webdavPath string) *httptest.Server {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	srv := server.New(server.Config{
-		Addr:        "127.0.0.1:0",
-		BaseURL:     "https://meet.lobb.ie",
-		AppID:       "vpaas-magic-cookie-test",
-		DefaultRoom: "lobby",
+		Addr:    "127.0.0.1:0",
+		BaseURL: "https://meet.lobb.ie",
+		AppID:   "vpaas-magic-cookie-test",
 		WebDAV: &server.WebDAVConfig{
 			URL:      webdavURL,
 			Path:     webdavPath,
@@ -104,7 +103,6 @@ func newWebhookTestServerNoWebDAV() *httptest.Server {
 		Addr:         "127.0.0.1:0",
 		BaseURL:      "https://meet.lobb.ie",
 		AppID:        "vpaas-magic-cookie-test",
-		DefaultRoom:  "lobby",
 		WebhookToken: testWebhookToken,
 		Logger:       logger,
 	})
