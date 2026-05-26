@@ -1,0 +1,6 @@
+Usage: meet cancel --room <name> [--note ...]
+
+Cancel a registered meeting room. After cancellation the URL is no longer
+joinable, even within its original time window.
+
+Options:

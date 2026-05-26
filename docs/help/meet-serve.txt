@@ -1,0 +1,9 @@
+Usage: meet [serve] [options]
+
+Start the meet web server. This is the default command.
+
+Example:
+  meet
+  meet serve --config config/defaults.yaml,config/host.yaml,secrets/host.yaml
+
+Options:

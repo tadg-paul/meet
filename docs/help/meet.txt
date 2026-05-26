@@ -1,0 +1,16 @@
+Usage: meet <command> [options]
+
+Commands:
+  serve    Start the web server (default)
+  token    Generate a moderator JWT URL for a room
+  create   Register a meeting room with a start/end window
+  cancel   Cancel a registered meeting room
+  list     List registered meeting rooms
+
+Flags:
+  -h, --help      Show this help
+  --version       Print version and exit
+
+Run 'meet <command> -h' for command-specific help.
+
+See also: meet-helper (SSH wrapper for invoking any meet subcommand on a remote host)

@@ -1,0 +1,99 @@
+// ABOUTME: Regression tests for issue #9 — meet help text is sourced from
+// ABOUTME: docs/help/, not hardcoded inline in Go source.
+
+package regression
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const helpDocsDir = "docs/help"
+
+func repoRootForHelp(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	return filepath.Clean(filepath.Join(cwd, "..", ".."))
+}
+
+// AC9.1 — top-level `meet -h` prose comes from docs/help/meet.txt. The full
+// contents of the docs file appear in the help output.
+func TestMeetHelp_TopLevel_SourcedFromDocs_RT9_1(t *testing.T) {
+	root := repoRootForHelp(t)
+	docSrc, err := os.ReadFile(filepath.Join(root, helpDocsDir, "meet.txt"))
+	if err != nil {
+		t.Fatalf("read docs source: %v", err)
+	}
+	stdout, stderr, _ := runMeet(t, t.TempDir(), "-h")
+	output := stdout + stderr
+	if !strings.Contains(output, strings.TrimSpace(string(docSrc))) {
+		t.Errorf("meet -h does not contain docs/help/meet.txt content\n--- docs ---\n%s\n--- output ---\n%s",
+			string(docSrc), output)
+	}
+}
+
+// AC9.1 — each subcommand's `-h` prose comes from docs/help/meet-<sub>.txt.
+func TestMeetHelp_SubcommandsSourcedFromDocs_RT9_2(t *testing.T) {
+	root := repoRootForHelp(t)
+	subs := []string{"serve", "token", "create", "cancel", "list"}
+	for _, sub := range subs {
+		t.Run(sub, func(t *testing.T) {
+			docPath := filepath.Join(root, helpDocsDir, "meet-"+sub+".txt")
+			docSrc, err := os.ReadFile(docPath)
+			if err != nil {
+				t.Fatalf("read docs source %s: %v", docPath, err)
+			}
+			stdout, stderr, _ := runMeet(t, t.TempDir(), sub, "-h")
+			output := stdout + stderr
+			if !strings.Contains(output, strings.TrimSpace(string(docSrc))) {
+				t.Errorf("meet %s -h does not contain docs/help/meet-%s.txt content\n--- docs ---\n%s\n--- output ---\n%s",
+					sub, sub, string(docSrc), output)
+			}
+		})
+	}
+}
+
+// AC9.1 (regression-protection) — cmd/meet/main.go does not contain inline
+// help-text strings. A hit means someone has re-introduced a hardcoded copy
+// in Go source instead of editing docs/help/.
+func TestMeetHelp_NoInlineHelpStrings_RT9_3(t *testing.T) {
+	root := repoRootForHelp(t)
+	mainPath := filepath.Join(root, "cmd", "meet", "main.go")
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	source := string(data)
+
+	// Phrases that uniquely identify the prose of each docs file.
+	forbidden := []string{
+		"Start the meet web server. This is the default command.",
+		"Generate a moderator JWT URL for a meeting room.",
+		"Register a meeting room. The URL becomes joinable",
+		"Cancel a registered meeting room. After cancellation",
+		"Run 'meet <command> -h' for command-specific help.",
+		"See also: meet-helper",
+	}
+	for _, phrase := range forbidden {
+		if strings.Contains(source, phrase) {
+			t.Errorf("cmd/meet/main.go contains hardcoded help-text phrase %q; should be in docs/help/", phrase)
+		}
+	}
+}
+
+// AC9.1 — auto-generated flag descriptions remain in the help output after
+// the docs prose. PrintDefaults still drives the Options section.
+func TestMeetHelp_FlagDescriptionsStillAuto_RT9_4(t *testing.T) {
+	stdout, stderr, _ := runMeet(t, t.TempDir(), "token", "-h")
+	output := stdout + stderr
+	// --room is a defined flag on the token subcommand; its description is
+	// emitted by fs.PrintDefaults(), not the docs source.
+	if !strings.Contains(output, "-room") {
+		t.Errorf("meet token -h does not include auto-generated --room flag description; output=%q", output)
+	}
+}

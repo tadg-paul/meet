@@ -1,0 +1,3 @@
+Usage: meet list [--filter all|active|upcoming|past|cancelled]
+
+Options:

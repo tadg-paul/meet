@@ -1,0 +1,11 @@
+Usage: meet token --room <room-name> [options]
+
+Generate a moderator JWT URL for a meeting room.
+Requires 8x8-keys (app-id, key-id, private-key) in the config.
+
+Example:
+  meet token --room workshop-april
+  meet token --room demo --config config/defaults.yaml,config/host.yaml,secrets/host.yaml
+  meet token --room demo --name Admin --expiry 4h
+
+Options:
