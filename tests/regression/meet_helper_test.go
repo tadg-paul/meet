@@ -191,8 +191,13 @@ func TestHelper_MakefileInstallsHelper_RT8_7(t *testing.T) {
 	if !strings.Contains(body, "ln -sfn $(CURDIR)/bin/meet-helper $(HOME)/.local/bin/meet-helper") {
 		t.Errorf("Makefile install target does not symlink meet-helper")
 	}
-	if strings.Contains(body, "meet-token") {
-		t.Errorf("Makefile still references meet-token")
+	// Discriminate: the docs source file docs/help/meet-token.txt is a
+	// legitimate reference to the `meet token` subcommand's prose; the
+	// OLD binary references (bin/meet-token, install symlink, build
+	// target on ./cmd/remote-token) are what should be gone.
+	stripped := strings.ReplaceAll(body, "docs/help/meet-token.txt", "")
+	if strings.Contains(stripped, "meet-token") || strings.Contains(stripped, "remote-token") {
+		t.Errorf("Makefile still references the old meet-token / remote-token binary")
 	}
 }
 
@@ -233,7 +238,16 @@ func TestHelper_NoMeetTokenReferences_RT8_8(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(data), "meet-token") || strings.Contains(string(data), "remote-token") {
+		// Discriminate the OLD binary reference from legitimate
+		// references to the per-subcommand docs file:
+		//   docs/help/meet-token.txt  → docs source for `meet token`
+		//   help-token.txt            → staged copy in cmd/meet/
+		// Strip these before checking for the old-binary literal.
+		content := string(data)
+		content = strings.ReplaceAll(content, "docs/help/meet-token.txt", "")
+		content = strings.ReplaceAll(content, "\"meet-token.txt\"", "")
+		content = strings.ReplaceAll(content, "meet-token.txt", "")
+		if strings.Contains(content, "meet-token") || strings.Contains(content, "remote-token") {
 			hits = append(hits, path)
 		}
 		return nil

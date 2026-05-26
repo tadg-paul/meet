@@ -36,3 +36,4 @@ config/localhost.yaml
 # Makefile copies them into each binary's package dir at build time
 # so Go's //go:embed can reach them).
 cmd/meet-helper/help.txt
+cmd/meet/help-*.txt

@@ -24,6 +24,12 @@ build: stage-help-text
 .PHONY: stage-help-text
 stage-help-text:
 	@cp docs/help/meet-helper.txt cmd/meet-helper/help.txt
+	@cp docs/help/meet.txt cmd/meet/help-meet.txt
+	@cp docs/help/meet-serve.txt cmd/meet/help-serve.txt
+	@cp docs/help/meet-token.txt cmd/meet/help-token.txt
+	@cp docs/help/meet-create.txt cmd/meet/help-create.txt
+	@cp docs/help/meet-cancel.txt cmd/meet/help-cancel.txt
+	@cp docs/help/meet-list.txt cmd/meet/help-list.txt
 
 test: stage-help-text lint
 	@echo "==> running regression tests"

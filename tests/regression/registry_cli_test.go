@@ -39,8 +39,29 @@ func buildMeetBinary() (string, error) {
 		return "", fmt.Errorf("getwd: %w", err)
 	}
 	repoRoot := filepath.Clean(filepath.Join(cwd, "..", ".."))
-	out := filepath.Join(repoRoot, "bin", "meet-cli-test")
 
+	// Stage docs/help/meet*.txt into cmd/meet/ so Go's //go:embed can
+	// reach them. The Makefile build target does the same; we replicate
+	// it here so `go test` works standalone (issue #9).
+	stagings := map[string]string{
+		"meet.txt":        "help-meet.txt",
+		"meet-serve.txt":  "help-serve.txt",
+		"meet-token.txt":  "help-token.txt",
+		"meet-create.txt": "help-create.txt",
+		"meet-cancel.txt": "help-cancel.txt",
+		"meet-list.txt":   "help-list.txt",
+	}
+	for src, dst := range stagings {
+		data, err := os.ReadFile(filepath.Join(repoRoot, "docs", "help", src))
+		if err != nil {
+			return "", fmt.Errorf("read docs help %s: %w", src, err)
+		}
+		if err := os.WriteFile(filepath.Join(repoRoot, "cmd", "meet", dst), data, 0o644); err != nil {
+			return "", fmt.Errorf("stage %s: %w", dst, err)
+		}
+	}
+
+	out := filepath.Join(repoRoot, "bin", "meet-cli-test")
 	cmd := exec.Command("go", "build", "-o", out, "./cmd/meet")
 	cmd.Dir = repoRoot
 	if combined, err := cmd.CombinedOutput(); err != nil {

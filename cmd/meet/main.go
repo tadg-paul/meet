@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
+	_ "embed"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -21,6 +22,29 @@ import (
 	"github.com/tadg-paul/meet/internal/server"
 	"gopkg.in/yaml.v3"
 )
+
+// Help text is copied from docs/help/meet*.txt into this package directory
+// by the Makefile stage-help-text target before build. The canonical
+// sources live in docs/help/; the staged copies here are gitignored. Do
+// not edit the *.txt files in this directory — edit docs/help/ and rebuild.
+
+//go:embed help-meet.txt
+var helpMeet string
+
+//go:embed help-serve.txt
+var helpServe string
+
+//go:embed help-token.txt
+var helpToken string
+
+//go:embed help-create.txt
+var helpCreate string
+
+//go:embed help-cancel.txt
+var helpCancel string
+
+//go:embed help-list.txt
+var helpList string
 
 // Version is the build identifier, overridden at link time.
 var Version = "dev"
@@ -100,36 +124,13 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: meet <command> [options]")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  serve    Start the web server (default)")
-	fmt.Fprintln(os.Stderr, "  token    Generate a moderator JWT URL for a room")
-	fmt.Fprintln(os.Stderr, "  create   Register a meeting room with a start/end window")
-	fmt.Fprintln(os.Stderr, "  cancel   Cancel a registered meeting room")
-	fmt.Fprintln(os.Stderr, "  list     List registered meeting rooms")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Flags:")
-	fmt.Fprintln(os.Stderr, "  -h, --help      Show this help")
-	fmt.Fprintln(os.Stderr, "  --version       Print version and exit")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Run 'meet <command> -h' for command-specific help.")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "See also: meet-helper (SSH wrapper for invoking any meet subcommand on a remote host)")
+	fmt.Fprint(os.Stderr, helpMeet)
 }
 
 func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: meet [serve] [options]")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Start the meet web server. This is the default command.")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Example:")
-		fmt.Fprintln(os.Stderr, "  meet")
-		fmt.Fprintln(os.Stderr, "  meet serve --config config/defaults.yaml,config/host.yaml,secrets/host.yaml")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Options:")
+		fmt.Fprint(os.Stderr, helpServe)
 		fs.PrintDefaults()
 	}
 	versionFlag := fs.Bool("version", false, "print version and exit")
@@ -285,17 +286,7 @@ func runServe(args []string) {
 func runToken(args []string) {
 	fs := flag.NewFlagSet("token", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: meet token --room <room-name> [options]")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Generate a moderator JWT URL for a meeting room.")
-		fmt.Fprintln(os.Stderr, "Requires 8x8-keys (app-id, key-id, private-key) in the config.")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Example:")
-		fmt.Fprintln(os.Stderr, "  meet token --room workshop-april")
-		fmt.Fprintln(os.Stderr, "  meet token --room demo --config config/defaults.yaml,config/host.yaml,secrets/host.yaml")
-		fmt.Fprintln(os.Stderr, "  meet token --room demo --name Admin --expiry 4h")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Options:")
+		fmt.Fprint(os.Stderr, helpToken)
 		fs.PrintDefaults()
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
@@ -418,14 +409,7 @@ func parsePrivateKey(pemStr string) *rsa.PrivateKey {
 func runCreate(args []string) {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: meet create --room <name> --from <ts> --until <ts> [--note ...]")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Register a meeting room. The URL becomes joinable from --from until --until")
-		fmt.Fprintln(os.Stderr, "for guests; moderator-JWT visits bypass the window.")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Timestamps are RFC3339 (e.g. 2026-05-22T19:00:00Z).")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Options:")
+		fmt.Fprint(os.Stderr, helpCreate)
 		fs.PrintDefaults()
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
@@ -474,12 +458,7 @@ func runCreate(args []string) {
 func runCancel(args []string) {
 	fs := flag.NewFlagSet("cancel", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: meet cancel --room <name> [--note ...]")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Cancel a registered meeting room. After cancellation the URL is no longer")
-		fmt.Fprintln(os.Stderr, "joinable, even within its original time window.")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Options:")
+		fmt.Fprint(os.Stderr, helpCancel)
 		fs.PrintDefaults()
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
@@ -515,9 +494,7 @@ func runCancel(args []string) {
 func runList(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: meet list [--filter all|active|upcoming|past|cancelled]")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Options:")
+		fmt.Fprint(os.Stderr, helpList)
 		fs.PrintDefaults()
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
