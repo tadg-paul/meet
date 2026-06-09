@@ -1,5 +1,5 @@
-// ABOUTME: meet entrypoint. Subcommands: serve (default) starts the web server,
-// ABOUTME: token generates a moderator JWT URL for a given room.
+// ABOUTME: meet entrypoint. Subcommands serve the app and manage rooms.
+// ABOUTME: Help prose is sourced from docs/help and staged at build time.
 
 package main
 
@@ -296,7 +296,7 @@ func runToken(args []string) {
 	fs.Parse(args)
 
 	if *roomFlag == "" {
-		fmt.Fprintln(os.Stderr, "Usage: meet token --room <room-name> [--config ...] [--name ...] [--expiry ...]")
+		fs.Usage()
 		os.Exit(2)
 	}
 

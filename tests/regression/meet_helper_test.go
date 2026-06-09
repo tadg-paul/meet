@@ -56,8 +56,16 @@ func ensureMeetHelperBin(t *testing.T) string {
 
 func runHelper(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
+	return runHelperWithEnv(t, nil, args...)
+}
+
+func runHelperWithEnv(t *testing.T, env []string, args ...string) (stdout, stderr string, exitCode int) {
+	t.Helper()
 	bin := ensureMeetHelperBin(t)
 	cmd := exec.Command(bin, args...)
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var sout, serr bytes.Buffer
 	cmd.Stdout = &sout
 	cmd.Stderr = &serr
@@ -69,6 +77,39 @@ func runHelper(t *testing.T, args ...string) (stdout, stderr string, exitCode in
 		t.Fatalf("exec meet-helper: %v", err)
 	}
 	return sout.String(), serr.String(), exitCode
+}
+
+func writeFakeMeet(t *testing.T, dir string) {
+	t.Helper()
+	script := `#!/usr/bin/env bash
+case "$1" in
+  serve|token|create|cancel|list)
+    printf 'LOCAL_HELP:%s\n' "$1"
+    ;;
+  *)
+    printf 'unknown command: %s\n' "$1" >&2
+    exit 2
+    ;;
+esac
+`
+	path := filepath.Join(dir, "meet")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake meet: %v", err)
+	}
+}
+
+func helperHelpSource(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(cwd, "..", ".."))
+	data, err := os.ReadFile(filepath.Join(repoRoot, "docs", "help", "meet-helper.txt"))
+	if err != nil {
+		t.Fatalf("read helper docs source: %v", err)
+	}
+	return string(data)
 }
 
 // AC10.1 — token subcommand: the constructed argv invokes the deploy-nix
@@ -265,12 +306,13 @@ func TestHelper_NoMeetTokenReferences_RT8_8(t *testing.T) {
 
 // AC8.4 — invocations with too few arguments exit non-zero.
 func TestHelper_NoArgs_ExitsNonZero_RT8_9(t *testing.T) {
+	docSrc := helperHelpSource(t)
 	_, stderr, code := runHelper(t)
 	if code == 0 {
 		t.Errorf("no-args exit=0, want non-zero")
 	}
-	if !strings.Contains(stderr, "Usage:") {
-		t.Errorf("stderr missing usage line: %q", stderr)
+	if stderr != docSrc {
+		t.Errorf("stderr does not match docs/help/meet-helper.txt\n--- docs ---\n%s\n--- stderr ---\n%s", docSrc, stderr)
 	}
 }
 
@@ -280,6 +322,7 @@ func TestHelper_NoArgs_ExitsNonZero_RT8_9(t *testing.T) {
 // path is not exercised here because it requires opening a real SSH
 // connection.
 func TestHelper_HelpFlags_ExitZero_RT8_10(t *testing.T) {
+	docSrc := helperHelpSource(t)
 	cases := [][]string{
 		{"-h"},
 		{"--help"},
@@ -292,8 +335,29 @@ func TestHelper_HelpFlags_ExitZero_RT8_10(t *testing.T) {
 			if code != 0 {
 				t.Errorf("%v: exit=%d, want 0", args, code)
 			}
-			if !strings.Contains(stdout, "Usage:") {
-				t.Errorf("%v: stdout missing usage line: %q", args, stdout)
+			if stdout != docSrc {
+				t.Errorf("%v: stdout does not match docs/help/meet-helper.txt\n--- docs ---\n%s\n--- stdout ---\n%s", args, docSrc, stdout)
+			}
+		})
+	}
+}
+
+// AC10.6 — after a subcommand has been named, --help is handled locally by
+// the companion meet binary for every supported subcommand. This keeps help
+// usable even when the remote NixOS admin wrapper needs config/secrets.
+func TestHelper_SubcommandHelpHandledLocally_RT10_9(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeMeet(t, dir)
+	env := []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")}
+
+	for _, subcommand := range []string{"serve", "token", "create", "cancel", "list"} {
+		t.Run(subcommand, func(t *testing.T) {
+			stdout, stderr, code := runHelperWithEnv(t, env, "skys-edge", subcommand, "--help")
+			if code != 0 {
+				t.Fatalf("%s help exit=%d, stderr=%q", subcommand, code, stderr)
+			}
+			if strings.TrimSpace(stdout) != "LOCAL_HELP:"+subcommand {
+				t.Errorf("%s help did not come from local meet subcommand help: %q", subcommand, stdout)
 			}
 		})
 	}
@@ -311,19 +375,14 @@ func TestHelper_HostOnly_ExitsNonZero_RT8_11(t *testing.T) {
 // byte-for-byte content of docs/help/meet-helper.txt, not a hardcoded copy
 // in Go source. Catches regressions where help drifts back into source.
 func TestHelper_HelpTextSourcedFromDocs_RT8_12(t *testing.T) {
-	cwd, _ := os.Getwd()
-	repoRoot := filepath.Clean(filepath.Join(cwd, "..", ".."))
-	docSrc, err := os.ReadFile(filepath.Join(repoRoot, "docs", "help", "meet-helper.txt"))
-	if err != nil {
-		t.Fatalf("read docs source: %v", err)
-	}
+	docSrc := helperHelpSource(t)
 
 	stdout, _, code := runHelper(t, "-h")
 	if code != 0 {
 		t.Fatalf("-h exit=%d", code)
 	}
-	if stdout != string(docSrc) {
+	if stdout != docSrc {
 		t.Errorf("help output diverges from docs/help/meet-helper.txt\n--- docs ---\n%s\n--- output ---\n%s",
-			string(docSrc), stdout)
+			docSrc, stdout)
 	}
 }

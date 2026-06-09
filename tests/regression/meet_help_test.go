@@ -70,18 +70,27 @@ func TestMeetHelp_NoInlineHelpStrings_RT9_3(t *testing.T) {
 	}
 	source := string(data)
 
-	// Phrases that uniquely identify the prose of each docs file.
-	forbidden := []string{
-		"Start the meet web server. This is the default command.",
-		"Generate a moderator JWT URL for a meeting room.",
-		"Register a meeting room. The URL becomes joinable",
-		"Cancel a registered meeting room. After cancellation",
-		"Run 'meet <command> -h' for command-specific help.",
-		"See also: meet-helper",
+	docPaths, err := filepath.Glob(filepath.Join(root, helpDocsDir, "*.txt"))
+	if err != nil {
+		t.Fatalf("glob docs help: %v", err)
 	}
-	for _, phrase := range forbidden {
-		if strings.Contains(source, phrase) {
-			t.Errorf("cmd/meet/main.go contains hardcoded help-text phrase %q; should be in docs/help/", phrase)
+	if len(docPaths) == 0 {
+		t.Fatal("no docs/help/*.txt files found")
+	}
+
+	for _, docPath := range docPaths {
+		data, err := os.ReadFile(docPath)
+		if err != nil {
+			t.Fatalf("read docs source %s: %v", docPath, err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			phrase := strings.TrimSpace(line)
+			if len(phrase) < 24 || strings.HasPrefix(phrase, "Usage:") {
+				continue
+			}
+			if strings.Contains(source, phrase) {
+				t.Errorf("cmd/meet/main.go contains help-text phrase from %s: %q", docPath, phrase)
+			}
 		}
 	}
 }

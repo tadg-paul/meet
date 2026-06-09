@@ -1,6 +1,12 @@
 Usage: meet token --room <room-name> [options]
 
-Generate a moderator JWT URL for a meeting room.
+Generate a moderator access link for a meeting room.
+
+A token is a signed 8x8/JaaS JWT embedded in the printed meeting URL. Opening
+that URL joins the room as a moderator, enables recording controls, and bypasses
+the room's registered time window. Send the plain room URL to guests; keep the
+token URL for the moderator.
+
 Requires 8x8-keys (app-id, key-id, private-key) in the config.
 
 Example:

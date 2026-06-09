@@ -27,9 +27,9 @@ func main() {
 
 	// Local help / version recognition: -h, --help, --version are
 	// handled locally when they appear before a subcommand has been
-	// named (positions 0 or 1). Once a subcommand has been named, any
-	// further -h is forwarded to the remote subcommand so callers can
-	// reach `meet token -h`, `meet create -h`, etc.
+	// named (positions 0 or 1). Subcommand help is handled below from
+	// the local companion meet binary so help never depends on remote
+	// config or secrets loading.
 	for i, a := range args {
 		if i > 1 {
 			break
@@ -53,6 +53,11 @@ func main() {
 	subcommand := args[1]
 	extra := args[2:]
 
+	if containsHelpFlag(extra) {
+		runLocalSubcommandHelp(subcommand)
+		return
+	}
+
 	argv := sshshim.BuildSSHArgv(host, subcommand, extra)
 	cmd := exec.Command("ssh", argv...)
 	cmd.Stdout = os.Stdout
@@ -70,4 +75,28 @@ func main() {
 
 func printUsage(out *os.File) {
 	fmt.Fprint(out, helpText)
+}
+
+func containsHelpFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+func runLocalSubcommandHelp(subcommand string) {
+	cmd := exec.Command("meet", subcommand, "--help")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		fmt.Fprintf(os.Stderr, "error: local meet help: %v\n", err)
+		os.Exit(1)
+	}
 }

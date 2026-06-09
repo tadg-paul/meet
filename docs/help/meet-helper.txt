@@ -4,15 +4,22 @@ Invoke any meet subcommand on a remote NixOS deploy host via SSH. The remote
 host runs the deploy-nix meet-admin wrapper, which supplies the app identity,
 config, secrets, state directory, working directory, and runtime environment.
 
+Subcommands:
+  serve    Start the web server (normally run by systemd, not by hand)
+  token    Generate a moderator access link for a room
+  create   Register a meeting room with a start/end window
+  cancel   Cancel a registered meeting room
+  list     List registered meeting rooms
+
 Examples:
   meet-helper skys-edge token --room workshop-april
+  meet-helper skys-edge create --room demo --on 2026-06-09
   meet-helper skys-edge create --room demo \
-    --from 2026-05-25T19:00:00Z --until 2026-05-25T21:00:00Z
+    --from 2026-06-09T18:00:00Z --until 2026-06-09T20:00:00Z
   meet-helper skys-edge list --filter active
   meet-helper skys-edge cancel --room demo
 
 The host must have meet deployed through deploy-nix with the meet-admin
 operator wrapper installed.
 
-Help for a specific remote subcommand: meet-helper <host> <subcommand> -h
-(the -h is forwarded to the remote meet binary).
+Help for a specific subcommand: meet-helper <host> <subcommand> --help

@@ -2,7 +2,7 @@ Usage: meet <command> [options]
 
 Commands:
   serve    Start the web server (default)
-  token    Generate a moderator JWT URL for a room
+  token    Generate a moderator access link for a room
   create   Register a meeting room with a start/end window
   cancel   Cancel a registered meeting room
   list     List registered meeting rooms
