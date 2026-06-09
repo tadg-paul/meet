@@ -414,23 +414,19 @@ func runCreate(args []string) {
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
 	roomFlag := fs.String("room", "", "room name (required)")
-	fromFlag := fs.String("from", "", "valid-from time, RFC3339 (required)")
-	untilFlag := fs.String("until", "", "valid-until time, RFC3339 (required)")
+	onFlag := fs.String("on", "", "meeting date YYYY-MM-DD; equivalent to --from dateT00:00:00Z --until dateT23:59:59Z")
+	fromFlag := fs.String("from", "", "valid-from time, RFC3339 or YYYY-MM-DD")
+	untilFlag := fs.String("until", "", "valid-until time, RFC3339 or YYYY-MM-DD")
 	noteFlag := fs.String("note", "", "free-form note")
 	fs.Parse(args)
 
-	if *roomFlag == "" || *fromFlag == "" || *untilFlag == "" {
+	if *roomFlag == "" || (*onFlag == "" && (*fromFlag == "" || *untilFlag == "")) {
 		fs.Usage()
 		os.Exit(2)
 	}
-	from, err := time.Parse(time.RFC3339, *fromFlag)
+	from, until, err := createWindow(*onFlag, *fromFlag, *untilFlag)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: --from: %v\n", err)
-		os.Exit(2)
-	}
-	until, err := time.Parse(time.RFC3339, *untilFlag)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: --until: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(2)
 	}
 
@@ -452,6 +448,44 @@ func runCreate(args []string) {
 	}
 	fmt.Printf("created %s [%s .. %s]\n",
 		*roomFlag, from.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339))
+}
+
+func createWindow(on, fromRaw, untilRaw string) (time.Time, time.Time, error) {
+	if on != "" {
+		if fromRaw != "" || untilRaw != "" {
+			return time.Time{}, time.Time{}, fmt.Errorf("--on cannot be combined with --from or --until")
+		}
+		day, err := parseDateOnly(on)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("--on: %w", err)
+		}
+		return day, day.Add(24*time.Hour - time.Second), nil
+	}
+
+	from, err := parseCreateTime(fromRaw)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("--from: %w", err)
+	}
+	until, err := parseCreateTime(untilRaw)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("--until: %w", err)
+	}
+	return from, until, nil
+}
+
+func parseCreateTime(raw string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, nil
+	}
+	return parseDateOnly(raw)
+}
+
+func parseDateOnly(raw string) (time.Time, error) {
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.UTC(), nil
 }
 
 // runCancel cancels a previously-registered room.

@@ -1,8 +1,11 @@
-Usage: meet create --room <name> --from <ts> --until <ts> [--note ...]
+Usage: meet create --room <name> (--on <date> | --from <ts> --until <ts>) [--note ...]
 
 Register a meeting room. The URL becomes joinable from --from until --until
 for guests; moderator-JWT visits bypass the window.
 
-Timestamps are RFC3339 (e.g. 2026-05-22T19:00:00Z).
+Timestamps are RFC3339 (e.g. 2026-05-22T19:00:00Z) or dates
+(e.g. 2026-05-22, interpreted as 00:00:00Z).
+
+Use --on YYYY-MM-DD for an all-day room from 00:00:00Z to 23:59:59Z.
 
 Options:

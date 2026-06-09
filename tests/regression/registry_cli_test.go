@@ -157,6 +157,68 @@ func TestCLI_Create_StoredFormatRoundTrips_RT7_9(t *testing.T) {
 	}
 }
 
+// AC10.5 — `meet create --from/--until` accepts date-only input and stores it
+// as midnight UTC for each date.
+func TestCLI_Create_DateOnlyFromUntil_RT10_6(t *testing.T) {
+	dir := t.TempDir()
+	stdout, stderr, code := runMeet(t, dir,
+		"create",
+		"--room", "date-only",
+		"--from", "2026-06-09",
+		"--until", "2026-06-10",
+	)
+	if code != 0 {
+		t.Fatalf("exit=%d, stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "created date-only [2026-06-09T00:00:00Z .. 2026-06-10T00:00:00Z]") {
+		t.Errorf("stdout does not show normalized dates: %q", stdout)
+	}
+	csv := readRoomsCSV(t, dir)
+	if !strings.Contains(csv, ",date-only,created,2026-06-09T00:00:00Z,2026-06-10T00:00:00Z,") {
+		t.Errorf("rooms.csv missing normalized date-only row; got:\n%s", csv)
+	}
+}
+
+// AC10.5 — `meet create --on` registers a whole UTC day without requiring
+// explicit from/until timestamps.
+func TestCLI_Create_OnDate_RT10_7(t *testing.T) {
+	dir := t.TempDir()
+	stdout, stderr, code := runMeet(t, dir,
+		"create",
+		"--room", "all-day",
+		"--on", "2026-06-09",
+	)
+	if code != 0 {
+		t.Fatalf("exit=%d, stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "created all-day [2026-06-09T00:00:00Z .. 2026-06-09T23:59:59Z]") {
+		t.Errorf("stdout does not show all-day range: %q", stdout)
+	}
+	csv := readRoomsCSV(t, dir)
+	if !strings.Contains(csv, ",all-day,created,2026-06-09T00:00:00Z,2026-06-09T23:59:59Z,") {
+		t.Errorf("rooms.csv missing all-day row; got:\n%s", csv)
+	}
+}
+
+// AC10.5 — `--on` is a shortcut, not an extra bound layered on top of
+// explicit from/until values.
+func TestCLI_Create_OnDateRejectsExplicitBounds_RT10_8(t *testing.T) {
+	dir := t.TempDir()
+	_, stderr, code := runMeet(t, dir,
+		"create",
+		"--room", "mixed",
+		"--on", "2026-06-09",
+		"--from", "2026-06-09T12:00:00Z",
+		"--until", "2026-06-09T13:00:00Z",
+	)
+	if code == 0 {
+		t.Errorf("mixed --on/--from/--until: exit=0, want non-zero")
+	}
+	if !strings.Contains(stderr, "--on cannot be combined") {
+		t.Errorf("stderr does not explain the failure: %q", stderr)
+	}
+}
+
 // AC7.3 — `meet create` with --from later than --until exits non-zero and
 // writes no row.
 func TestCLI_Create_InvalidWindowRejected_RT7_10(t *testing.T) {
