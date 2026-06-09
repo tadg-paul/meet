@@ -132,7 +132,6 @@ func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, helpServe)
-		fs.PrintDefaults()
 	}
 	versionFlag := fs.Bool("version", false, "print version and exit")
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
@@ -287,7 +286,6 @@ func runToken(args []string) {
 	fs := flag.NewFlagSet("token", flag.ExitOnError)
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, helpToken)
-		fs.PrintDefaults()
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
 	roomFlag := fs.String("room", "", "room name (required)")
@@ -410,7 +408,6 @@ func runCreate(args []string) {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, helpCreate)
-		fs.PrintDefaults()
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
 	roomFlag := fs.String("room", "", "room name (required)")
@@ -493,7 +490,6 @@ func runCancel(args []string) {
 	fs := flag.NewFlagSet("cancel", flag.ExitOnError)
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, helpCancel)
-		fs.PrintDefaults()
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
 	roomFlag := fs.String("room", "", "room name (required)")
@@ -529,7 +525,6 @@ func runList(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, helpList)
-		fs.PrintDefaults()
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
 	filterFlag := fs.String("filter", "all", "all | active | upcoming | past | cancelled")

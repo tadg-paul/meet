@@ -8,9 +8,9 @@ Commands:
   list     List registered meeting rooms
 
 Flags:
-  -h, --help      Show this help
+  --help          Show this help
   --version       Print version and exit
 
-Run 'meet <command> -h' for command-specific help.
+Run 'meet <command> --help' for command-specific help.
 
 See also: meet-helper (SSH wrapper for invoking any meet subcommand on a remote host)

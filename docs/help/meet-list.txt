@@ -1,3 +1,7 @@
 Usage: meet list [--filter all|active|upcoming|past|cancelled]
 
 Options:
+  --filter <status>   Rooms to show: all, active, upcoming, past, or cancelled.
+                      Default: all.
+  --config <paths>    Comma-separated config files. Defaults to auto-discovery
+                      from CONFIG_PATH, SECRETS_PATH, and local config files.

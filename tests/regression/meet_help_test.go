@@ -95,14 +95,15 @@ func TestMeetHelp_NoInlineHelpStrings_RT9_3(t *testing.T) {
 	}
 }
 
-// AC9.1 — auto-generated flag descriptions remain in the help output after
-// the docs prose. PrintDefaults still drives the Options section.
-func TestMeetHelp_FlagDescriptionsStillAuto_RT9_4(t *testing.T) {
-	stdout, stderr, _ := runMeet(t, t.TempDir(), "token", "-h")
+// AC9.1 — help documents double-hyphen flags and does not expose Go flag's
+// single-hyphen PrintDefaults output.
+func TestMeetHelp_DocOwnedDoubleHyphenFlags_RT9_4(t *testing.T) {
+	stdout, stderr, _ := runMeet(t, t.TempDir(), "token", "--help")
 	output := stdout + stderr
-	// --room is a defined flag on the token subcommand; its description is
-	// emitted by fs.PrintDefaults(), not the docs source.
-	if !strings.Contains(output, "-room") {
-		t.Errorf("meet token -h does not include auto-generated --room flag description; output=%q", output)
+	if !strings.Contains(output, "--room <name>") {
+		t.Errorf("meet token --help does not include docs-owned --room option; output=%q", output)
+	}
+	if strings.Contains(output, "\n  -room") || strings.Contains(output, "\n  -config") {
+		t.Errorf("meet token --help exposes single-hyphen flag defaults; output=%q", output)
 	}
 }

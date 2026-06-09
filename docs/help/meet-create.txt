@@ -9,3 +9,11 @@ Timestamps are RFC3339 (e.g. 2026-05-22T19:00:00Z) or dates
 Use --on YYYY-MM-DD for an all-day room from 00:00:00Z to 23:59:59Z.
 
 Options:
+  --room <name>       Room name to register. Required.
+  --on <date>         Meeting date as YYYY-MM-DD; creates an all-day window
+                      from 00:00:00Z to 23:59:59Z.
+  --from <timestamp>  Valid-from time, as RFC3339 or YYYY-MM-DD.
+  --until <timestamp> Valid-until time, as RFC3339 or YYYY-MM-DD.
+  --note <text>       Free-form note stored with the registry event.
+  --config <paths>    Comma-separated config files. Defaults to auto-discovery
+                      from CONFIG_PATH, SECRETS_PATH, and local config files.

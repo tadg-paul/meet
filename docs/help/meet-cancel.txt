@@ -4,3 +4,7 @@ Cancel a registered meeting room. After cancellation the URL is no longer
 joinable, even within its original time window.
 
 Options:
+  --room <name>       Room name to cancel. Required.
+  --note <text>       Free-form note stored with the cancellation event.
+  --config <paths>    Comma-separated config files. Defaults to auto-discovery
+                      from CONFIG_PATH, SECRETS_PATH, and local config files.

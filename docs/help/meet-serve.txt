@@ -7,3 +7,6 @@ Example:
   meet serve --config config/defaults.yaml,config/host.yaml,secrets/host.yaml
 
 Options:
+  --config <paths>    Comma-separated config files. Defaults to auto-discovery
+                      from CONFIG_PATH, SECRETS_PATH, and local config files.
+  --version           Print version and exit.

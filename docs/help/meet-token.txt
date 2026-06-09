@@ -15,3 +15,9 @@ Example:
   meet token --room demo --name Admin --expiry 4h
 
 Options:
+  --room <name>       Room name to generate the moderator link for. Required.
+  --config <paths>    Comma-separated config files. Defaults to auto-discovery
+                      from CONFIG_PATH, SECRETS_PATH, and local config files.
+  --name <name>       Moderator display name. Defaults to configured
+                      default-moderator-name or "Moderator".
+  --expiry <duration> Token validity duration, such as 2h or 30m. Default: 2h.
