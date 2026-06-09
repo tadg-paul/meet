@@ -1,18 +1,18 @@
 Usage: meet-helper <host> <subcommand> [args...]
 
-Invoke any meet subcommand on a remote deploy host via SSH. The config
-cascade (defaults.yaml + per-host config + secrets) is supplied
-automatically using the deploy convention.
+Invoke any meet subcommand on a remote NixOS deploy host via SSH. The remote
+host runs the deploy-nix meet-admin wrapper, which supplies the app identity,
+config, secrets, state directory, working directory, and runtime environment.
 
 Examples:
-  meet-helper light-hugger token --room workshop-april
-  meet-helper light-hugger create --room demo \
+  meet-helper skys-edge token --room workshop-april
+  meet-helper skys-edge create --room demo \
     --from 2026-05-25T19:00:00Z --until 2026-05-25T21:00:00Z
-  meet-helper light-hugger list --filter active
-  meet-helper light-hugger cancel --room demo
+  meet-helper skys-edge list --filter active
+  meet-helper skys-edge cancel --room demo
 
-The host must have meet deployed at /srv/meet/meet with config and
-secrets at the standard paths.
+The host must have meet deployed through deploy-nix with the meet-admin
+operator wrapper installed.
 
 Help for a specific remote subcommand: meet-helper <host> <subcommand> -h
 (the -h is forwarded to the remote meet binary).

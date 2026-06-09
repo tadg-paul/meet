@@ -1,4 +1,4 @@
-// ABOUTME: Regression tests for the meet-helper SSH shim (issue #8).
+// ABOUTME: Regression tests for the meet-helper SSH shim (issues #8 and #10).
 // ABOUTME: Verifies argv construction directly via the exported function
 // ABOUTME: (no SSH connection opened) plus a small set of CLI exec tests
 // ABOUTME: that exercise help/usage and exit codes.
@@ -71,18 +71,19 @@ func runHelper(t *testing.T, args ...string) (stdout, stderr string, exitCode in
 	return sout.String(), serr.String(), exitCode
 }
 
-// AC8.1 — token subcommand: the constructed argv invokes /srv/meet/meet
-// on the remote host with the token subcommand and any forwarded args.
-func TestHelper_TokenSubcommand_RT8_1(t *testing.T) {
-	argv := sshshim.BuildSSHArgv("light-hugger", "token", []string{"--room", "foo"})
+// AC10.1 — token subcommand: the constructed argv invokes the deploy-nix
+// meet-admin wrapper on the remote host with the token subcommand and any
+// forwarded args.
+func TestHelper_TokenSubcommand_RT10_1(t *testing.T) {
+	argv := sshshim.BuildSSHArgv("skys-edge", "token", []string{"--room", "foo"})
 	if len(argv) != 2 {
 		t.Fatalf("argv has %d elements, want 2 (host, remote-command)", len(argv))
 	}
-	if argv[0] != "light-hugger" {
-		t.Errorf("argv[0] = %q, want %q", argv[0], "light-hugger")
+	if argv[0] != "skys-edge" {
+		t.Errorf("argv[0] = %q, want %q", argv[0], "skys-edge")
 	}
-	if !strings.Contains(argv[1], "'/srv/meet/meet'") {
-		t.Errorf("remote command missing meet binary: %q", argv[1])
+	if !strings.Contains(argv[1], "'sudo' '-u' 'meet' 'meet-admin'") {
+		t.Errorf("remote command missing meet-admin wrapper: %q", argv[1])
 	}
 	if !strings.Contains(argv[1], "'token'") {
 		t.Errorf("remote command missing token subcommand: %q", argv[1])
@@ -92,9 +93,9 @@ func TestHelper_TokenSubcommand_RT8_1(t *testing.T) {
 	}
 }
 
-// AC8.1 — create subcommand with multiple args is forwarded in order.
-func TestHelper_CreateSubcommand_RT8_2(t *testing.T) {
-	argv := sshshim.BuildSSHArgv("light-hugger", "create", []string{
+// AC10.2 — create subcommand with multiple args is forwarded in order.
+func TestHelper_CreateSubcommand_RT10_3(t *testing.T) {
+	argv := sshshim.BuildSSHArgv("skys-edge", "create", []string{
 		"--room", "demo", "--from", "2026-05-25T19:00:00Z", "--until", "2026-05-25T21:00:00Z",
 	})
 	cmd := argv[1]
@@ -111,8 +112,8 @@ func TestHelper_CreateSubcommand_RT8_2(t *testing.T) {
 	}
 }
 
-// AC8.1 — args containing shell metacharacters are quoted, not interpreted.
-func TestHelper_ShellMetacharactersQuoted_RT8_3(t *testing.T) {
+// AC10.2 — args containing shell metacharacters are quoted, not interpreted.
+func TestHelper_ShellMetacharactersQuoted_RT10_4(t *testing.T) {
 	cases := []struct {
 		name string
 		arg  string
@@ -137,28 +138,30 @@ func TestHelper_ShellMetacharactersQuoted_RT8_3(t *testing.T) {
 	}
 }
 
-// AC8.2 — --config flag value contains exactly the canonical cascade.
-func TestHelper_ConfigCascade_RT8_4(t *testing.T) {
-	argv := sshshim.BuildSSHArgv("light-hugger", "list", nil)
+// AC10.1 — remote command goes through the NixOS meet-admin wrapper and does
+// not embed config or secrets paths owned by deploy-nix.
+func TestHelper_NixAdminWrapper_RT10_2(t *testing.T) {
+	argv := sshshim.BuildSSHArgv("skys-edge", "list", nil)
 	cmd := argv[1]
-	wantCascade := "/srv/meet/repo/config/defaults.yaml,/srv/meet/repo/config/light-hugger.yaml,/etc/meet/secrets.yaml"
-	if !strings.Contains(cmd, wantCascade) {
-		t.Errorf("remote command missing canonical cascade %q; got: %q", wantCascade, cmd)
+	if !strings.Contains(cmd, "'sudo' '-u' 'meet' 'meet-admin'") {
+		t.Errorf("remote command missing NixOS admin wrapper: %q", cmd)
 	}
-	// Make sure --config appears exactly once.
-	if strings.Count(cmd, "'--config'") != 1 {
-		t.Errorf("expected exactly one --config flag in remote command; got: %q", cmd)
+	forbidden := []string{"--config", "/srv/meet/meet", "/srv/meet/repo/config", "/etc/meet/secrets.yaml", "/opt/apps/meet"}
+	for _, phrase := range forbidden {
+		if strings.Contains(cmd, phrase) {
+			t.Errorf("remote command embeds %q instead of relying on meet-admin: %q", phrase, cmd)
+		}
 	}
 }
 
-// AC8.2 — hostname is interpolated verbatim into the per-host config path.
-func TestHelper_HostInterpolation_RT8_5(t *testing.T) {
+// AC10.2 — hostname is the ssh destination only; app paths are supplied by
+// the remote meet-admin wrapper.
+func TestHelper_HostIsSSHDestinationOnly_RT10_5(t *testing.T) {
 	for _, host := range []string{"light-hugger", "skys-edge", "chasm-city"} {
 		t.Run(host, func(t *testing.T) {
 			argv := sshshim.BuildSSHArgv(host, "list", nil)
-			want := fmt.Sprintf("/srv/meet/repo/config/%s.yaml", host)
-			if !strings.Contains(argv[1], want) {
-				t.Errorf("remote command missing host-specific config %q; got: %q", want, argv[1])
+			if strings.Contains(argv[1], fmt.Sprintf("%s.yaml", host)) {
+				t.Errorf("remote command interpolates host into app config path; got: %q", argv[1])
 			}
 			if argv[0] != host {
 				t.Errorf("ssh hostname = %q, want %q", argv[0], host)
@@ -207,7 +210,7 @@ func TestHelper_NoMeetTokenReferences_RT8_8(t *testing.T) {
 	cwd, _ := os.Getwd()
 	repoRoot := filepath.Clean(filepath.Join(cwd, "..", ".."))
 	suffixes := []string{".go", ".md", "Makefile"}
-	skipDirs := map[string]bool{".git": true, "bin": true, "node_modules": true}
+	skipDirs := map[string]bool{".git": true, ".claude": true, ".agent": true, "bin": true, "node_modules": true}
 
 	var hits []string
 	err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, walkErr error) error {

@@ -1,5 +1,5 @@
-// ABOUTME: meet-helper CLI shim (issue #8). Invokes any meet subcommand on
-// ABOUTME: a remote host via ssh with the canonical deploy-time config cascade.
+// ABOUTME: meet-helper CLI shim. Invokes any meet subcommand on a remote
+// ABOUTME: NixOS host via ssh and the deploy-nix meet-admin wrapper.
 
 package main
 

@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -151,8 +152,7 @@ func runServe(args []string) {
 	cfg := loadConfig(configPaths, logger)
 
 	// ADDR env var takes precedence over addr in config YAML.
-	// Nix hosts allocate a port at deploy time via ADDR; Ubuntu hosts
-	// set addr in config YAML. During the transition both must work.
+	// NixOS hosts allocate a port at deploy time via ADDR.
 	if envAddr := os.Getenv("ADDR"); envAddr != "" {
 		cfg.Addr = envAddr
 	}
@@ -540,11 +540,14 @@ func stateDir() string {
 	return "."
 }
 
-// buildConfigPaths builds the config file chain from environment
-// variables, following the same convention as writeback and golink.
+// buildConfigPaths builds the config file chain from environment variables.
 // Load order: defaults -> host config -> secrets (each overrides the previous).
 func buildConfigPaths() string {
-	paths := []string{"config/defaults.yaml"}
+	defaultsPath := "config/defaults.yaml"
+	if cp := os.Getenv("CONFIG_PATH"); cp != "" {
+		defaultsPath = filepath.Join(filepath.Dir(cp), "defaults.yaml")
+	}
+	paths := []string{defaultsPath}
 
 	if cp := os.Getenv("CONFIG_PATH"); cp != "" {
 		paths = append(paths, cp)

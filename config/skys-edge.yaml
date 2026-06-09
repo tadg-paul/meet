@@ -1,5 +1,7 @@
 addr: "127.0.0.1:18082"
-base_url: "https://edge.meet.lobb.ie"
+base_url: "https://meet.lobb.ie"
 default-moderator-name: "Taḋg"
+
 recording:
-   webdav-path: meeting-recordings
+  webdav:
+    path: meeting-recordings
