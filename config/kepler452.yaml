@@ -1,5 +1,5 @@
 addr: "127.0.0.1:18085"
-base_url: "https://light-hugger.meet.lobb.ie"
+base_url: "https://meet.lobb.ie"
 default-moderator-name: "Tadg"
 
 recording:
