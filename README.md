@@ -32,6 +32,8 @@ make token ROOM=my-room   # generate a moderator URL
 meet                        # start the web server (default: serve)
 meet serve --config ...     # start with explicit config files
 meet token --room <name>    # generate a moderator JWT URL
+meet moderator-link --room <name> --email <addr> --send
+                            # send a room-scoped moderator magic link
 meet --help                 # show usage
 meet --version              # print version
 ```
@@ -42,6 +44,8 @@ meet --version              # print version
 meet-helper <host> <subcommand> [args...]
 # Examples:
 meet-helper light-hugger token --room workshop-april
+meet-helper light-hugger moderator-link --room workshop-april \
+  --email moderator@example.com --send
 meet-helper light-hugger create --room demo \
   --from 2026-05-25T19:00:00Z --until 2026-05-25T21:00:00Z
 meet-helper light-hugger list --filter active
@@ -92,6 +96,7 @@ The `--config` flag is still supported for explicit override. For local dev,
 | `recording.webdav-user` | secrets | Nextcloud username |
 | `recording.webdav-password` | secrets | Nextcloud app password |
 | `recording.webhook-token` | secrets | Bearer token for 8x8 webhook auth |
+| `moderator-auth` | secrets | Room-to-moderator email relationships and SMTP credentials |
 
 ## Features
 
@@ -105,6 +110,10 @@ highlighted. Root `/` serves the default room (configurable).
 
 `meet token --room <name>` generates a JWT URL with moderator privileges and
 recording enabled. The JWT is passed to the 8x8 JaaS API client-side.
+
+`/<room>/moderator` lets a preapproved moderator request a room-scoped magic
+link. The email-to-room relationships and SMTP credentials live in
+`secrets/<host>.yaml.age`, loaded at runtime through `SECRETS_PATH`.
 
 ### Recording
 

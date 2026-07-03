@@ -3,6 +3,10 @@ Usage: meet <command> [options]
 Commands:
   serve    Start the web server (default)
   token    Generate a moderator access link for a room
+  moderator-link
+           Generate or send a room-scoped moderator magic link
+  moderator-verify
+           Verify a room-scoped moderator magic link and print the moderator URL
   create   Register a meeting room with a start/end window
   cancel   Cancel a registered meeting room
   list     List registered meeting rooms

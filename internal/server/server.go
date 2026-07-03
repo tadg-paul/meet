@@ -27,11 +27,11 @@ var indexHTML string
 
 // Config holds the server configuration.
 type Config struct {
-	Addr         string
-	BaseURL      string
-	AppID        string
-	DataDir      string
-	WebDAV       *WebDAVConfig
+	Addr    string
+	BaseURL string
+	AppID   string
+	DataDir string
+	WebDAV  *WebDAVConfig
 	// Stream is the Cloudflare Stream client used for video uploads. When
 	// nil, RECORDING_UPLOADED webhooks log "stream not configured" and the
 	// file remains in download/ for manual recovery (issue #6).
@@ -39,8 +39,8 @@ type Config struct {
 	Recordings         *RecordingsLog
 	PlayerBaseURL      string
 	LocalRetentionDays int
-	WebhookToken string
-	Logger       *slog.Logger
+	WebhookToken       string
+	Logger             *slog.Logger
 	// Rooms is the registry consulted by handleRoom. When non-nil, every
 	// request to /<room> is gated against this registry (#7). When nil, the
 	// gate is disabled and any room name loads the meeting page (legacy).
@@ -48,6 +48,12 @@ type Config struct {
 	// JWTPublicKey verifies the optional ?jwt= query parameter for the
 	// moderator bypass. Nil disables JWT bypass entirely.
 	JWTPublicKey *rsa.PublicKey
+	// JWTPrivateKey signs room-scoped moderator JWTs after magic-link
+	// verification. Nil disables moderator magic-link verification.
+	JWTPrivateKey *rsa.PrivateKey
+	JWTKeyID      string
+	// ModeratorAuth controls the room-scoped moderator magic-link flow.
+	ModeratorAuth ModeratorAuthConfig
 	// Now returns the current time. Defaults to time.Now in New. Tests
 	// inject a controllable clock here.
 	Now func() time.Time
@@ -64,11 +70,11 @@ type Server struct {
 }
 
 type pageData struct {
-	AppID        string
-	RoomName       string
-	DomainFull     string
-	DomainFirst    string
-	DomainRest     string
+	AppID       string
+	RoomName    string
+	DomainFull  string
+	DomainFirst string
+	DomainRest  string
 }
 
 // New creates a configured Server ready to listen.
@@ -162,6 +168,15 @@ func (s *Server) handleRoom(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	path = strings.TrimSuffix(path, "/")
 
+	if room, ok := moderatorRoute(path, "moderator"); ok {
+		s.handleModerator(w, r, room)
+		return
+	}
+	if room, ok := moderatorRoute(path, "moderator/verify"); ok {
+		s.handleModeratorVerify(w, r, room)
+		return
+	}
+
 	// Reject paths with slashes (only single-segment room names).
 	if strings.Contains(path, "/") {
 		http.Error(w, "Invalid room name", http.StatusBadRequest)
@@ -179,7 +194,7 @@ func (s *Server) handleRoom(w http.ResponseWriter, r *http.Request) {
 	domainFull, domainFirst, domainRest := parseDomain(s.cfg.BaseURL)
 
 	data := pageData{
-		AppID:     s.cfg.AppID,
+		AppID:       s.cfg.AppID,
 		RoomName:    path,
 		DomainFull:  domainFull,
 		DomainFirst: domainFirst,
@@ -226,7 +241,7 @@ func parseDomain(baseURL string) (full, first, rest string) {
 //     path is rejected. This preserves the original "no gating" path for any
 //     caller that has not opted in.
 func (s *Server) gateAllows(path string, r *http.Request) bool {
-	if s.hasValidModeratorJWT(r) {
+	if s.hasValidModeratorJWT(path, r) {
 		return true
 	}
 	if path == "" {
@@ -250,7 +265,7 @@ func (s *Server) gateAllows(path string, r *http.Request) bool {
 // hasValidModeratorJWT returns true when the request carries a ?jwt= query
 // parameter whose token verifies against the configured public key and
 // asserts moderator=true. Any failure path returns false (treated as no JWT).
-func (s *Server) hasValidModeratorJWT(r *http.Request) bool {
+func (s *Server) hasValidModeratorJWT(path string, r *http.Request) bool {
 	tokenStr := r.URL.Query().Get("jwt")
 	if tokenStr == "" {
 		return false
@@ -271,6 +286,10 @@ func (s *Server) hasValidModeratorJWT(r *http.Request) bool {
 	if !ok {
 		return false
 	}
+	claimRoom, ok := claims["room"].(string)
+	if !ok || (claimRoom != "*" && claimRoom != path) {
+		return false
+	}
 	ctx, ok := claims["context"].(map[string]any)
 	if !ok {
 		return false
@@ -287,4 +306,16 @@ func (s *Server) hasValidModeratorJWT(r *http.Request) bool {
 		return v
 	}
 	return false
+}
+
+func moderatorRoute(path, suffix string) (string, bool) {
+	want := "/" + suffix
+	if !strings.HasSuffix(path, want) {
+		return "", false
+	}
+	room := strings.TrimSuffix(path, want)
+	if room == "" || strings.Contains(room, "/") {
+		return "", false
+	}
+	return room, true
 }

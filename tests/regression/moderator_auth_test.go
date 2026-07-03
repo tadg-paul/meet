@@ -71,23 +71,23 @@ func newModeratorFixture(t *testing.T, configure func(*server.Config, *captureMo
 	}
 	logs := &bytes.Buffer{}
 	mailer := &captureModeratorMailer{}
-	now := mustRFC3339(t, "2026-05-22T20:00:00Z")
+	f := &moderatorFixture{rooms: rooms, links: links, mailer: mailer, key: key, logs: logs, now: mustRFC3339(t, "2026-05-22T20:00:00Z")}
 	cfg := server.Config{
 		BaseURL:      "https://meet.lobb.ie",
 		AppID:        "vpaas-magic-cookie-test",
 		Logger:       slog.New(slog.NewJSONHandler(logs, nil)),
 		Rooms:        rooms,
 		JWTPublicKey: &key.PublicKey,
-		Now:          func() time.Time { return now },
+		Now:          func() time.Time { return f.now },
 		ModeratorAuth: server.ModeratorAuthConfig{
 			Enabled:         true,
 			MagicLinkTTL:    15 * time.Minute,
 			ModeratorJWTTTL: 2 * time.Hour,
 			SigningKey:      []byte("test moderator auth signing key"),
 			Rooms: map[string][]string{
-				"allowed-room": {"mod@example.com", "Second@Example.com"},
-				"other-room":   {"other@example.com"},
-				"workshop":     {"mod@example.com"},
+				"allowed-room": []string{"mod@example.com", "Second@Example.com"},
+				"other-room":   []string{"other@example.com"},
+				"workshop":     []string{"mod@example.com"},
 			},
 			Links:  links,
 			Mailer: mailer,
@@ -99,7 +99,6 @@ func newModeratorFixture(t *testing.T, configure func(*server.Config, *captureMo
 		configure(&cfg, mailer)
 	}
 	srv := server.New(cfg)
-	f := &moderatorFixture{rooms: rooms, links: links, mailer: mailer, key: key, logs: logs, now: now}
 	f.ts = httptest.NewServer(srv.Handler())
 	t.Cleanup(f.ts.Close)
 	return f
@@ -107,7 +106,12 @@ func newModeratorFixture(t *testing.T, configure func(*server.Config, *captureMo
 
 func (f *moderatorFixture) get(t *testing.T, path string) (int, string, http.Header) {
 	t.Helper()
-	resp, err := http.Get(f.ts.URL + path)
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Get(f.ts.URL + path)
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
 	}
@@ -283,7 +287,7 @@ func TestModeratorAuth_InvalidMagicLinksRejected_RT12_13_RT12_14_RT12_15(t *test
 			cfg.ModeratorAuth.MagicLinkTTL = time.Nanosecond
 		})
 		f.postForm(t, "/allowed-room/moderator", url.Values{"email": {"mod@example.com"}})
-		time.Sleep(2 * time.Millisecond)
+		f.now = f.now.Add(time.Second)
 		verifyURL, _ := url.Parse(f.mailer.messages[0].link)
 		status, _, _ := f.get(t, verifyURL.RequestURI())
 		if status != http.StatusUnauthorized {

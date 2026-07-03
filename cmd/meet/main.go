@@ -56,6 +56,7 @@ type appConfig struct {
 	DefaultModeratorName string    `yaml:"default-moderator-name"`
 	Keys8x8              keys8x8   `yaml:"8x8-keys"`
 	Recording            recording `yaml:"recording"`
+	ModeratorAuth        modAuth   `yaml:"moderator-auth"`
 }
 
 type recording struct {
@@ -88,6 +89,20 @@ type smtp struct {
 	Pass string `yaml:"pass"`
 }
 
+type modAuth struct {
+	Enabled         bool               `yaml:"enabled"`
+	MagicLinkTTL    string             `yaml:"magic-link-ttl"`
+	ModeratorJWTTTL string             `yaml:"moderator-jwt-ttl"`
+	SigningKey      string             `yaml:"signing-key"`
+	FromEmail       string             `yaml:"from-email"`
+	SMTP            smtp               `yaml:"smtp"`
+	Rooms           map[string]modRoom `yaml:"rooms"`
+}
+
+type modRoom struct {
+	Moderators []string `yaml:"moderators"`
+}
+
 type keys8x8 struct {
 	AppID      string `yaml:"app-id"`
 	KeyID      string `yaml:"key-id"`
@@ -103,6 +118,12 @@ func main() {
 			return
 		case "token":
 			runToken(os.Args[2:])
+			return
+		case "moderator-link":
+			runModeratorLink(os.Args[2:])
+			return
+		case "moderator-verify":
+			runModeratorVerify(os.Args[2:])
 			return
 		case "create":
 			runCreate(os.Args[2:])
@@ -187,11 +208,24 @@ func runServe(args []string) {
 			pubKey = parsed
 		}
 	}
+	var privKey *rsa.PrivateKey
+	if cfg.ModeratorAuth.Enabled {
+		if cfg.Keys8x8.PrivateKey == "" {
+			logger.Error("private-key not configured — moderator auth cannot mint room JWTs")
+			os.Exit(1)
+		}
+		privKey = parsePrivateKey(cfg.Keys8x8.PrivateKey)
+	}
 
 	// Open the recordings log. Tracks CF Stream uploads (#6).
 	recordings, err := server.NewRecordingsLog(dataDir)
 	if err != nil {
 		logger.Error("opening recordings log", "error", err)
+		os.Exit(1)
+	}
+	moderatorLinks, err := server.NewModeratorLinksLog(dataDir)
+	if err != nil {
+		logger.Error("opening moderator links log", "error", err)
 		os.Exit(1)
 	}
 
@@ -234,6 +268,9 @@ func runServe(args []string) {
 		Logger:             logger,
 		Rooms:              rooms,
 		JWTPublicKey:       pubKey,
+		JWTPrivateKey:      privKey,
+		JWTKeyID:           cfg.Keys8x8.KeyID,
+		ModeratorAuth:      buildModeratorAuthConfig(cfg, moderatorLinks),
 		Stream:             streamClient,
 		Recordings:         recordings,
 		PlayerBaseURL:      playerBaseURL,
@@ -331,24 +368,7 @@ func runToken(args []string) {
 	privKey := parsePrivateKey(cfg.Keys8x8.PrivateKey)
 
 	now := time.Now()
-	claims := jwt.MapClaims{
-		"aud":  "jitsi",
-		"iss":  "chat",
-		"sub":  cfg.Keys8x8.AppID,
-		"room": "*",
-		"iat":  now.Unix(),
-		"nbf":  now.Unix(),
-		"exp":  now.Add(*expiryFlag).Unix(),
-		"context": map[string]interface{}{
-			"user": map[string]interface{}{
-				"name":      displayName,
-				"moderator": "true",
-			},
-			"features": map[string]interface{}{
-				"recording": true,
-			},
-		},
-	}
+	claims := server.ModeratorJWTClaims(cfg.Keys8x8.AppID, "*", displayName, now, *expiryFlag)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = cfg.Keys8x8.KeyID
@@ -360,6 +380,128 @@ func runToken(args []string) {
 	}
 
 	fmt.Printf("%s/%s?jwt=%s\n", cfg.BaseURL, *roomFlag, signed)
+}
+
+func runModeratorLink(args []string) {
+	fs := flag.NewFlagSet("moderator-link", flag.ExitOnError)
+	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
+	roomFlag := fs.String("room", "", "room name (required)")
+	emailFlag := fs.String("email", "", "moderator email (required)")
+	printFlag := fs.Bool("print", false, "print the magic link")
+	sendFlag := fs.Bool("send", false, "send the magic link by SMTP")
+	fs.Parse(args)
+
+	if *roomFlag == "" || *emailFlag == "" || (!*printFlag && !*sendFlag) {
+		fmt.Fprintln(os.Stderr, "usage: meet moderator-link --room <room> --email <email> (--print | --send)")
+		os.Exit(2)
+	}
+	srv, _ := moderatorCLIServer(*configFlag)
+	var (
+		link string
+		err  error
+	)
+	if *printFlag {
+		link, err = srv.CreatePrintedModeratorMagicLink(*roomFlag, *emailFlag)
+	} else {
+		link, err = srv.CreateDeliveredModeratorMagicLink(*roomFlag, *emailFlag)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if *printFlag {
+		fmt.Println(link)
+	}
+}
+
+func runModeratorVerify(args []string) {
+	fs := flag.NewFlagSet("moderator-verify", flag.ExitOnError)
+	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
+	roomFlag := fs.String("room", "", "room name (required)")
+	tokenFlag := fs.String("token", "", "magic link token (required)")
+	fs.Parse(args)
+
+	if *roomFlag == "" || *tokenFlag == "" {
+		fmt.Fprintln(os.Stderr, "usage: meet moderator-verify --room <room> --token <token>")
+		os.Exit(2)
+	}
+	srv, cfg := moderatorCLIServer(*configFlag)
+	moderatorURL, err := srv.VerifyModeratorMagicLinkForCLI(*roomFlag, *tokenFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%s%s\n", strings.TrimRight(cfg.BaseURL, "/"), moderatorURL)
+}
+
+func moderatorCLIServer(configFlag string) (*server.Server, appConfig) {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	configPaths := configFlag
+	if configPaths == "" {
+		configPaths = buildConfigPaths()
+	}
+	cfg := loadConfig(configPaths, logger)
+	if cfg.Keys8x8.AppID == "" || cfg.Keys8x8.KeyID == "" || cfg.Keys8x8.PrivateKey == "" {
+		fmt.Fprintln(os.Stderr, "error: 8x8 keys not configured")
+		os.Exit(1)
+	}
+	privKey := parsePrivateKey(cfg.Keys8x8.PrivateKey)
+	links, err := server.NewModeratorLinksLog(stateDir())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: opening moderator links log: %v\n", err)
+		os.Exit(1)
+	}
+	srv := server.New(server.Config{
+		BaseURL:       cfg.BaseURL,
+		AppID:         cfg.Keys8x8.AppID,
+		Logger:        logger,
+		JWTPrivateKey: privKey,
+		JWTKeyID:      cfg.Keys8x8.KeyID,
+		ModeratorAuth: buildModeratorAuthConfig(cfg, links),
+	})
+	return srv, cfg
+}
+
+func buildModeratorAuthConfig(cfg appConfig, links *server.ModeratorLinksLog) server.ModeratorAuthConfig {
+	rooms := make(map[string][]string, len(cfg.ModeratorAuth.Rooms))
+	for room, entry := range cfg.ModeratorAuth.Rooms {
+		rooms[room] = append([]string{}, entry.Moderators...)
+	}
+	magicTTL := parseDurationDefault(cfg.ModeratorAuth.MagicLinkTTL, 15*time.Minute)
+	jwtTTL := parseDurationDefault(cfg.ModeratorAuth.ModeratorJWTTTL, 2*time.Hour)
+	authCfg := server.ModeratorAuthConfig{
+		Enabled:         cfg.ModeratorAuth.Enabled,
+		MagicLinkTTL:    magicTTL,
+		ModeratorJWTTTL: jwtTTL,
+		SigningKey:      []byte(cfg.ModeratorAuth.SigningKey),
+		FromEmail:       cfg.ModeratorAuth.FromEmail,
+		SMTP: server.SMTPConfig{
+			Host: cfg.ModeratorAuth.SMTP.Host,
+			Port: cfg.ModeratorAuth.SMTP.Port,
+			User: cfg.ModeratorAuth.SMTP.User,
+			Pass: cfg.ModeratorAuth.SMTP.Pass,
+		},
+		Rooms: rooms,
+		Links: links,
+	}
+	if len(authCfg.SigningKey) == 0 && cfg.Keys8x8.PrivateKey != "" {
+		authCfg.SigningKey = []byte(cfg.Keys8x8.PrivateKey)
+	}
+	if authCfg.FromEmail != "" && authCfg.SMTP.Host != "" {
+		authCfg.Mailer = server.SMTPModeratorMailer{From: authCfg.FromEmail, SMTP: authCfg.SMTP}
+	}
+	return authCfg
+}
+
+func parseDurationDefault(raw string, fallback time.Duration) time.Duration {
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback
+	}
+	return d
 }
 
 // parsePublicKey decodes a PEM-encoded RSA public key. Used by the registry

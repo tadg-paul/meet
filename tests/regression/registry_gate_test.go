@@ -74,12 +74,17 @@ func (f *fixture) get(t *testing.T, path string) (status int, body string) {
 // against time.Now, not the server's injected clock.
 func (f *fixture) moderatorJWT(t *testing.T) string {
 	t.Helper()
+	return f.moderatorJWTForRoom(t, "*")
+}
+
+func (f *fixture) moderatorJWTForRoom(t *testing.T, room string) string {
+	t.Helper()
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"aud":  "jitsi",
 		"iss":  "chat",
 		"sub":  "vpaas-magic-cookie-test",
-		"room": "*",
+		"room": room,
 		"iat":  now.Unix(),
 		"nbf":  now.Add(-time.Minute).Unix(),
 		"exp":  now.Add(2 * time.Hour).Unix(),
@@ -349,6 +354,75 @@ func TestGate_RootPathRejected_RT7_27(t *testing.T) {
 	status, _ := f.get(t, "/")
 	if status == http.StatusOK {
 		t.Errorf("/ returned %d, want non-200 (no implicit default room)", status)
+	}
+}
+
+// AC12.4 — latest created row for a reused room controls guest access.
+func TestGate_ReusedRoomLatestActiveWindow_RT12_16_RT12_17(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "reused",
+		mustRFC3339(t, "2026-05-20T19:00:00Z"),
+		mustRFC3339(t, "2026-05-20T21:00:00Z"),
+	)
+	f.registerRoom(t, "reused",
+		mustRFC3339(t, "2026-05-22T19:00:00Z"),
+		mustRFC3339(t, "2026-05-22T21:00:00Z"),
+	)
+	status, body := f.get(t, "/reused")
+	if status != http.StatusOK || !bodyIsMeetingPage(body) {
+		t.Fatalf("latest active window status=%d meeting=%v", status, bodyIsMeetingPage(body))
+	}
+	f.now = mustRFC3339(t, "2026-05-22T22:00:00Z")
+	status, _ = f.get(t, "/reused")
+	if status == http.StatusOK {
+		t.Errorf("outside latest window returned %d, want non-200", status)
+	}
+}
+
+// AC12.4 — a latest cancelled row overrides earlier active rows.
+func TestGate_ReusedRoomLatestCancelled_RT12_18(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "reused",
+		mustRFC3339(t, "2026-05-22T19:00:00Z"),
+		mustRFC3339(t, "2026-05-22T21:00:00Z"),
+	)
+	f.cancelRoom(t, "reused")
+	status, _ := f.get(t, "/reused")
+	if status == http.StatusOK {
+		t.Errorf("latest cancelled row returned %d, want non-200", status)
+	}
+}
+
+// AC12.4 — moderator authorization does not make the plain guest URL joinable.
+func TestGate_ModeratorAuthDoesNotOpenPlainRoom_RT12_19(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "plain",
+		mustRFC3339(t, "2026-05-22T18:00:00Z"),
+		mustRFC3339(t, "2026-05-22T19:00:00Z"),
+	)
+	status, _ := f.get(t, "/plain")
+	if status == http.StatusOK {
+		t.Errorf("plain out-of-window room returned %d, want non-200", status)
+	}
+}
+
+// AC12.7 — wildcard super-moderator JWTs still bypass any room during lifetime.
+func TestGate_SuperModeratorWildcardAllowsDifferentRoom_RT12_29(t *testing.T) {
+	f := newGateFixture(t)
+	jwtStr := f.moderatorJWTForRoom(t, "*")
+	status, body := f.get(t, "/different-room?jwt="+jwtStr)
+	if status != http.StatusOK || !bodyIsMeetingPage(body) {
+		t.Fatalf("wildcard moderator status=%d meeting=%v", status, bodyIsMeetingPage(body))
+	}
+}
+
+// AC12.8 — room-scoped moderator JWTs do not bypass other rooms.
+func TestGate_RoomScopedModeratorRejectsDifferentRoom_RT12_32(t *testing.T) {
+	f := newGateFixture(t)
+	jwtStr := f.moderatorJWTForRoom(t, "allowed-room")
+	status, _ := f.get(t, "/different-room?jwt="+jwtStr)
+	if status == http.StatusOK {
+		t.Errorf("room-scoped moderator on different room returned %d, want non-200", status)
 	}
 }
 

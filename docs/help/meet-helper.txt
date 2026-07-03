@@ -7,12 +7,18 @@ config, secrets, state directory, working directory, and runtime environment.
 Subcommands:
   serve    Start the web server (normally run by systemd, not by hand)
   token    Generate a moderator access link for a room
+  moderator-link
+           Generate or send a room-scoped moderator magic link
+  moderator-verify
+           Verify a room-scoped moderator magic link and print the moderator URL
   create   Register a meeting room with a start/end window
   cancel   Cancel a registered meeting room
   list     List registered meeting rooms
 
 Examples:
   meet-helper skys-edge token --room workshop-april
+  meet-helper skys-edge moderator-link --room workshop-april \
+    --email moderator@example.com --send
   meet-helper skys-edge create --room demo --on 2026-06-09
   meet-helper skys-edge create --room demo \
     --from 2026-06-09T18:00:00Z --until 2026-06-09T20:00:00Z
