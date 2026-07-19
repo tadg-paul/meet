@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tadg-paul/meet/internal/sshshim"
+	"github.com/tigger-developer/meet/internal/sshshim"
 )
 
 // meetHelperBin is populated by ensureMeetHelperBin (lazy build).

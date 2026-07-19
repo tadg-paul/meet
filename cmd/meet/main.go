@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/tadg-paul/meet/internal/server"
+	"github.com/tigger-developer/meet/internal/server"
 	"gopkg.in/yaml.v3"
 )
 

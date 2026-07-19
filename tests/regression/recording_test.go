@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tadg-paul/meet/internal/server"
+	"github.com/tigger-developer/meet/internal/server"
 )
 
 // streamFixture wires the webhook server with both backends and exposes the

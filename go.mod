@@ -1,4 +1,4 @@
-module github.com/tadg-paul/meet
+module github.com/tigger-developer/meet
 
 go 1.24.2
 toolchain go1.26.2

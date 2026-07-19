@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/tadg-paul/meet/internal/sshshim"
+	"github.com/tigger-developer/meet/internal/sshshim"
 )
 
 // helpText is copied from docs/help/meet-helper.txt by the Makefile build
