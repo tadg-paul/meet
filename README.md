@@ -162,4 +162,4 @@ contains local dev targets only - no deploy, SSH, or systemd targets.
 
 ## Licence
 
-MIT - Copyright Tadg Paul
+MIT - Copyright Tadhg O'Brien
