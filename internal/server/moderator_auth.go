@@ -73,6 +73,16 @@ type moderatorTokenPayload struct {
 	Expiry int64  `json:"exp"`
 }
 
+type moderatorAuthPageData struct {
+	Title       string
+	Heading     string
+	Message     string
+	Room        string
+	ShowForm    bool
+	DomainFirst string
+	DomainRest  string
+}
+
 type SMTPModeratorMailer struct {
 	From string
 	SMTP SMTPConfig
@@ -238,29 +248,41 @@ func (s *Server) handleModeratorVerify(w http.ResponseWriter, r *http.Request, r
 		s.logger.Warn("moderator magic link verification failed", "room", room, "error", err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte("<!doctype html><title>Invalid link</title><p>Invalid or expired moderator link.</p>"))
+		s.renderModeratorAuthPage(w, moderatorAuthPageData{
+			Title:   "Invalid link",
+			Heading: "Invalid link",
+			Message: "Invalid or expired moderator link.",
+		})
 		return
 	}
 	http.Redirect(w, r, moderatorURL, http.StatusSeeOther)
 }
 
 func (s *Server) renderModeratorForm(w http.ResponseWriter, room string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl := template.Must(template.New("moderator").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Moderator access</title></head>
-<body><main><h1>Moderator access</h1><form method="post" action="/{{.Room}}/moderator">
-<label for="email">Email address</label>
-<input id="email" name="email" type="email" required autofocus>
-<button type="submit">Send link</button>
-</form></main></body></html>`))
-	if err := tmpl.Execute(w, struct{ Room string }{Room: room}); err != nil {
-		s.logger.Error("moderator form render failed", "error", err)
-	}
+	s.renderModeratorAuthPage(w, moderatorAuthPageData{
+		Title:    "Moderator access",
+		Heading:  "Moderator access",
+		Message:  "Enter the preapproved email address for this room.",
+		Room:     room,
+		ShowForm: true,
+	})
 }
 
 func (s *Server) renderModeratorCheckEmail(w http.ResponseWriter) {
+	s.renderModeratorAuthPage(w, moderatorAuthPageData{
+		Title:   "Check your email",
+		Heading: "Check your email",
+		Message: "If that address is authorised, check your email for a moderator link.",
+	})
+}
+
+func (s *Server) renderModeratorAuthPage(w http.ResponseWriter, data moderatorAuthPageData) {
+	_, data.DomainFirst, data.DomainRest = parseDomain(s.cfg.BaseURL)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte("<!doctype html><title>Check your email</title><p>If that address is authorised, check your email for a moderator link.</p>"))
+	tmpl := template.Must(template.New("moderator-auth").Parse(moderatorAuthPageHTML))
+	if err := tmpl.Execute(w, data); err != nil {
+		s.logger.Error("moderator auth page render failed", "error", err)
+	}
 }
 
 func (s *Server) handleModeratorSubmit(w http.ResponseWriter, r *http.Request, room string) {
@@ -512,3 +534,141 @@ func hashString(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
+
+const moderatorAuthPageHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.Title}}</title>
+    <style>
+        @font-face {
+            font-family: 'Special Elite';
+            src: url('/static/SpecialElite-Regular.woff2') format('woff2');
+            font-display: swap;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            font-size: 100%;
+        }
+
+        body.auth-page {
+            min-height: 100vh;
+            padding-top: 3.5rem;
+            background: #f5f5f5;
+            color: #333;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        .banner {
+            position: fixed;
+            top: 0;
+            right: 0;
+            left: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            padding: 0.5rem 1rem;
+            background: #1a3a5c;
+        }
+
+        .banner a {
+            font-family: 'Special Elite', serif;
+            font-size: 2rem;
+            line-height: 1;
+            text-decoration: none;
+        }
+
+        .banner .domain-highlight {
+            color: #f0f0f0;
+        }
+
+        .banner .domain-dim {
+            color: #8a9bae;
+        }
+
+        .auth-card {
+            max-width: 28rem;
+            margin: 3rem auto;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            background: #fff;
+            box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.08);
+        }
+
+        .auth-card h1 {
+            margin-bottom: 1rem;
+            font-size: 1.25rem;
+        }
+
+        .auth-card p {
+            margin-bottom: 1rem;
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .auth-card label {
+            display: block;
+            margin-bottom: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .auth-card input[type="email"] {
+            width: 100%;
+            margin-bottom: 1rem;
+            padding: 0.625rem;
+            border: 0.0625rem solid #ccc;
+            border-radius: 0.25rem;
+            font-size: 1rem;
+        }
+
+        .auth-card input[type="email"]:focus {
+            border-color: #2563eb;
+            outline: none;
+            box-shadow: 0 0 0 0.125rem rgba(37, 99, 235, 0.2);
+        }
+
+        .auth-card button[type="submit"] {
+            width: 100%;
+            padding: 0.625rem;
+            border: 0;
+            border-radius: 0.25rem;
+            background: #2563eb;
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+
+        .auth-card button[type="submit"]:hover {
+            background: #1d4ed8;
+        }
+    </style>
+</head>
+<body class="auth-page">
+    <div class="banner">
+        <a href="/">
+            <span class="domain-highlight">{{.DomainFirst}}</span><span class="domain-dim">{{.DomainRest}}</span>
+        </a>
+    </div>
+    <main class="auth-card">
+        <h1>{{.Heading}}</h1>
+        <p>{{.Message}}</p>
+        {{if .ShowForm}}
+        <form method="post" action="/{{.Room}}/moderator">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" required placeholder="you@example.com" autofocus>
+            <button type="submit">Send link</button>
+        </form>
+        {{end}}
+    </main>
+</body>
+</html>`

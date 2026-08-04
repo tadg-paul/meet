@@ -148,7 +148,22 @@ func extractModeratorToken(t *testing.T, location string) string {
 // and an outbound magic-link message.
 func TestModeratorAuth_AllowedEmailSendsMagicLink_RT12_1_RT12_24(t *testing.T) {
 	f := newModeratorFixture(t, nil)
-	status, body := f.postForm(t, "/allowed-room/moderator", url.Values{"email": {"mod@example.com"}})
+	status, body, _ := f.get(t, "/allowed-room/moderator")
+	if status != http.StatusOK {
+		t.Fatalf("GET status=%d body=%q", status, body)
+	}
+	for _, want := range []string{
+		`body class="auth-page"`,
+		`main class="auth-card"`,
+		`class="banner"`,
+		`action="/allowed-room/moderator"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET body missing %q", want)
+		}
+	}
+
+	status, body = f.postForm(t, "/allowed-room/moderator", url.Values{"email": {"mod@example.com"}})
 	if status != http.StatusOK {
 		t.Fatalf("status=%d body=%q", status, body)
 	}
