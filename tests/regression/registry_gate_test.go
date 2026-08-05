@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -431,4 +432,323 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// --- Issue #13: inactive-room page for gated meeting slugs ---
+
+const inactiveParagraph = "This meeting room is not active. If you have been given this link for a meeting, it may be the case that this is the correct meeting room but the room is not active currently. Please check the meeting date and time."
+
+func bodyIsInactivePage(body string) bool {
+	return strings.Contains(body, "<h1>Inactive</h1>") && strings.Contains(body, inactiveParagraph)
+}
+
+// doReq issues a request with an explicit method and returns the response
+// (status and headers) plus the body. The body is fully read and closed.
+func (f *fixture) doReq(t *testing.T, method, path string) (*http.Response, string) {
+	t.Helper()
+	req, err := http.NewRequest(method, f.ts.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request %s %s: %v", method, path, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return resp, string(raw)
+}
+
+// headerFingerprint renders a stable, comparable string of response headers,
+// excluding headers that legitimately vary between two otherwise-identical
+// responses (Date is per-request; Content-Length is compared separately via
+// resp.ContentLength to avoid client-side header normalization differences).
+func headerFingerprint(h http.Header) string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		if k == "Date" || k == "Content-Length" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.WriteString(strings.Join(h[k], ","))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// blockedResponse captures the observable surface of a blocked-slug response.
+type blockedResponse struct {
+	status      int
+	fingerprint string
+	length      int64
+	body        string
+}
+
+func (f *fixture) blocked(t *testing.T, path string) blockedResponse {
+	t.Helper()
+	resp, body := f.doReq(t, "GET", path)
+	return blockedResponse{
+		status:      resp.StatusCode,
+		fingerprint: headerFingerprint(resp.Header),
+		length:      resp.ContentLength,
+		body:        body,
+	}
+}
+
+// AC13.1 / RT-13.1 — unregistered slug: 404 inactive page.
+func TestInactive_UnregisteredSlug_RT13_1(t *testing.T) {
+	f := newGateFixture(t)
+	resp, body := f.doReq(t, "GET", "/never-registered-room")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+	if !bodyIsInactivePage(body) {
+		t.Errorf("body is not the inactive page; got %q", body[:min(200, len(body))])
+	}
+}
+
+// AC13.1 / RT-13.2 — registered but before its window: same inactive page.
+func TestInactive_BeforeWindow_RT13_2(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "foo", f.now.Add(time.Hour), f.now.Add(2*time.Hour))
+	resp, body := f.doReq(t, "GET", "/foo")
+	if resp.StatusCode != http.StatusNotFound || !bodyIsInactivePage(body) {
+		t.Errorf("before-window: status=%d inactive=%v", resp.StatusCode, bodyIsInactivePage(body))
+	}
+}
+
+// AC13.1 / RT-13.3 — registered but after its window: same inactive page.
+func TestInactive_AfterWindow_RT13_3(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "foo", f.now.Add(-2*time.Hour), f.now.Add(-time.Hour))
+	resp, body := f.doReq(t, "GET", "/foo")
+	if resp.StatusCode != http.StatusNotFound || !bodyIsInactivePage(body) {
+		t.Errorf("after-window: status=%d inactive=%v", resp.StatusCode, bodyIsInactivePage(body))
+	}
+}
+
+// AC13.1 / RT-13.4 — cancelled latest row: same inactive page.
+func TestInactive_Cancelled_RT13_4(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "foo", f.now.Add(-time.Hour), f.now.Add(time.Hour))
+	f.cancelRoom(t, "foo")
+	resp, body := f.doReq(t, "GET", "/foo")
+	if resp.StatusCode != http.StatusNotFound || !bodyIsInactivePage(body) {
+		t.Errorf("cancelled: status=%d inactive=%v", resp.StatusCode, bodyIsInactivePage(body))
+	}
+}
+
+// AC13.1 / RT-13.5 — all four blocked states are byte-for-byte identical in
+// status, headers, and body.
+func TestInactive_BlockedStatesIdentical_RT13_5(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "before", f.now.Add(time.Hour), f.now.Add(2*time.Hour))
+	f.registerRoom(t, "after", f.now.Add(-2*time.Hour), f.now.Add(-time.Hour))
+	f.registerRoom(t, "cxl", f.now.Add(-time.Hour), f.now.Add(time.Hour))
+	f.cancelRoom(t, "cxl")
+
+	unknown := f.blocked(t, "/never-registered")
+	before := f.blocked(t, "/before")
+	after := f.blocked(t, "/after")
+	cancelled := f.blocked(t, "/cxl")
+
+	for _, got := range []blockedResponse{before, after, cancelled} {
+		if got.status != unknown.status {
+			t.Errorf("status differs: %d vs %d", got.status, unknown.status)
+		}
+		if got.fingerprint != unknown.fingerprint {
+			t.Errorf("headers differ:\n%s\nvs\n%s", got.fingerprint, unknown.fingerprint)
+		}
+		if got.length != unknown.length {
+			t.Errorf("content-length differs: %d vs %d", got.length, unknown.length)
+		}
+		if got.body != unknown.body {
+			t.Errorf("body differs across blocked states")
+		}
+	}
+}
+
+// AC13.1 / RT-13.6 — blocked slug carries no JaaS meeting embed.
+func TestInactive_NoMeetingEmbed_RT13_6(t *testing.T) {
+	f := newGateFixture(t)
+	_, body := f.doReq(t, "GET", "/blocked-slug")
+	if bodyIsMeetingPage(body) {
+		t.Error("blocked slug served meeting page")
+	}
+	for _, marker := range []string{"JitsiMeetExternalAPI", "vpaas-magic-cookie-test", "jaas-container"} {
+		if strings.Contains(body, marker) {
+			t.Errorf("blocked slug body contains embed marker %q", marker)
+		}
+	}
+}
+
+// AC13.1 / RT-13.12 — HEAD and a disallowed method match the GET inactive
+// response, with no header that varies by blocked state.
+func TestInactive_HeadAndMethodParity_RT13_12(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "after", f.now.Add(-2*time.Hour), f.now.Add(-time.Hour))
+
+	get, getBody := f.doReq(t, "GET", "/unknown")
+
+	head, _ := f.doReq(t, "HEAD", "/unknown")
+	if head.StatusCode != get.StatusCode {
+		t.Errorf("HEAD status=%d, want %d", head.StatusCode, get.StatusCode)
+	}
+	if head.Header.Get("Content-Type") != get.Header.Get("Content-Type") {
+		t.Errorf("HEAD Content-Type=%q, want %q", head.Header.Get("Content-Type"), get.Header.Get("Content-Type"))
+	}
+	if head.Header.Get("Cache-Control") != get.Header.Get("Cache-Control") {
+		t.Errorf("HEAD Cache-Control=%q, want %q", head.Header.Get("Cache-Control"), get.Header.Get("Cache-Control"))
+	}
+	if head.ContentLength != int64(len(getBody)) {
+		t.Errorf("HEAD ContentLength=%d, want %d", head.ContentLength, len(getBody))
+	}
+
+	// HEAD must not vary by blocked state.
+	headKnown, _ := f.doReq(t, "HEAD", "/after")
+	if headKnown.ContentLength != head.ContentLength ||
+		headKnown.Header.Get("Cache-Control") != head.Header.Get("Cache-Control") ||
+		headKnown.Header.Get("Content-Type") != head.Header.Get("Content-Type") {
+		t.Error("HEAD headers vary by blocked state")
+	}
+
+	// A disallowed method returns the same status and headers as GET.
+	put, _ := f.doReq(t, "PUT", "/unknown")
+	if put.StatusCode != get.StatusCode {
+		t.Errorf("PUT status=%d, want %d", put.StatusCode, get.StatusCode)
+	}
+	if headerFingerprint(put.Header) != headerFingerprint(get.Header) {
+		t.Error("PUT headers differ from GET inactive response")
+	}
+}
+
+// AC13.1 / RT-13.13 — the empty top-level segment "/" returns the inactive page.
+func TestInactive_RootPath_RT13_13(t *testing.T) {
+	f := newGateFixture(t)
+	resp, body := f.doReq(t, "GET", "/")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("/ status=%d, want 404", resp.StatusCode)
+	}
+	if !bodyIsInactivePage(body) {
+		t.Errorf("/ did not return the inactive page; got %q", body[:min(200, len(body))])
+	}
+}
+
+// AC13.2 / RT-13.7 — the moderator entry route keeps its page, no inactive copy.
+func TestInactive_ModeratorRouteUnaffected_RT13_7(t *testing.T) {
+	f := newGateFixture(t)
+	resp, body := f.doReq(t, "GET", "/workshop/moderator")
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("moderator route status=%d, want 200", resp.StatusCode)
+	}
+	if strings.Contains(body, inactiveParagraph) {
+		t.Error("moderator route contains inactive-room message")
+	}
+	if !strings.Contains(body, "Moderator access") {
+		t.Errorf("moderator route did not render the entry form; got %q", body[:min(200, len(body))])
+	}
+}
+
+// AC13.2 / RT-13.8 — a nested invalid room path keeps its response.
+func TestInactive_NestedInvalidPath_RT13_8(t *testing.T) {
+	f := newGateFixture(t)
+	resp, body := f.doReq(t, "GET", "/bad/name")
+	if resp.StatusCode == http.StatusOK {
+		t.Errorf("nested path status=%d, want non-200", resp.StatusCode)
+	}
+	if strings.Contains(body, inactiveParagraph) {
+		t.Error("nested invalid path contains inactive-room message")
+	}
+}
+
+// AC13.2 / RT-13.9 — a nested moderator-like path does not become an inactive page.
+func TestInactive_NestedModeratorLikePath_RT13_9(t *testing.T) {
+	f := newGateFixture(t)
+	_, body := f.doReq(t, "GET", "/bad/name/moderator")
+	if strings.Contains(body, inactiveParagraph) {
+		t.Error("nested moderator-like path contains inactive-room message")
+	}
+	if bodyIsInactivePage(body) {
+		t.Error("nested moderator-like path rendered the inactive page")
+	}
+}
+
+// AC13.2 / RT-13.14 — the moderator entry route is invariant to registry state:
+// the same slug returns the same response whether or not it is registered/active.
+func TestInactive_ModeratorRouteRegistryInvariant_RT13_14(t *testing.T) {
+	f := newGateFixture(t)
+	before, beforeBody := f.doReq(t, "GET", "/wg/moderator")
+	f.registerRoom(t, "wg", f.now.Add(-time.Hour), f.now.Add(time.Hour))
+	after, afterBody := f.doReq(t, "GET", "/wg/moderator")
+
+	if before.StatusCode != after.StatusCode {
+		t.Errorf("moderator status changed with registry state: %d vs %d", before.StatusCode, after.StatusCode)
+	}
+	if headerFingerprint(before.Header) != headerFingerprint(after.Header) {
+		t.Error("moderator headers changed with registry state")
+	}
+	if beforeBody != afterBody {
+		t.Error("moderator page body changed with registry state")
+	}
+}
+
+// AC13.3 / RT-13.10 — an active room still serves the meeting page.
+func TestInactive_ActiveRoomServesMeeting_RT13_10(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "live", f.now.Add(-time.Hour), f.now.Add(time.Hour))
+	resp, body := f.doReq(t, "GET", "/live")
+	if resp.StatusCode != http.StatusOK || !bodyIsMeetingPage(body) {
+		t.Errorf("active room status=%d meeting=%v", resp.StatusCode, bodyIsMeetingPage(body))
+	}
+	if bodyIsInactivePage(body) {
+		t.Error("active room rendered the inactive page")
+	}
+}
+
+// AC13.3 / RT-13.11 — a previously-valid (cancelled or expired) slug is
+// indistinguishable from a never-registered slug.
+func TestInactive_PreviouslyValidIndistinguishable_RT13_11(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "expired", f.now.Add(-2*time.Hour), f.now.Add(-time.Hour))
+	f.registerRoom(t, "cxl", f.now.Add(-time.Hour), f.now.Add(time.Hour))
+	f.cancelRoom(t, "cxl")
+
+	unknown := f.blocked(t, "/never-registered")
+	for name, got := range map[string]blockedResponse{
+		"expired":   f.blocked(t, "/expired"),
+		"cancelled": f.blocked(t, "/cxl"),
+	} {
+		if got.status != unknown.status || got.fingerprint != unknown.fingerprint ||
+			got.length != unknown.length || got.body != unknown.body {
+			t.Errorf("%s slug distinguishable from never-registered slug", name)
+		}
+	}
+}
+
+// AC13.4 / RT-13.15 — the inactive-room response is not cacheable.
+func TestInactive_NoStore_RT13_15(t *testing.T) {
+	f := newGateFixture(t)
+	resp, _ := f.doReq(t, "GET", "/blocked-slug")
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("inactive Cache-Control=%q, want no-store", got)
+	}
+}
+
+// AC13.4 / RT-13.16 — the meeting page is not cacheable.
+func TestInactive_MeetingNoStore_RT13_16(t *testing.T) {
+	f := newGateFixture(t)
+	f.registerRoom(t, "live", f.now.Add(-time.Hour), f.now.Add(time.Hour))
+	resp, body := f.doReq(t, "GET", "/live")
+	if !bodyIsMeetingPage(body) {
+		t.Fatalf("precondition: /live is not the meeting page")
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("meeting Cache-Control=%q, want no-store", got)
+	}
 }
