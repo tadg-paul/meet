@@ -4,6 +4,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"embed"
@@ -13,11 +14,18 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// inactiveRoomMessage is the single explanation shown for every blocked public
+// meeting-room slug, regardless of why it is blocked (#13). Keeping the copy
+// (and the whole response) identical across states prevents the gate from
+// becoming a room-existence oracle.
+const inactiveRoomMessage = "This meeting room is not active. If you have been given this link for a meeting, it may be the case that this is the correct meeting room but the room is not active currently. Please check the meeting date and time."
 
 //go:embed all:static
 var staticFS embed.FS
@@ -67,6 +75,9 @@ type Server struct {
 	logger *slog.Logger
 	dedup  *deduplicator
 	now    func() time.Time
+	// inactiveBody is the pre-rendered inactive-room page (#13). It is fixed
+	// at construction so every blocked slug emits byte-identical output.
+	inactiveBody []byte
 }
 
 type pageData struct {
@@ -86,11 +97,12 @@ func New(cfg Config) *Server {
 		now = time.Now
 	}
 	s := &Server{
-		cfg:    cfg,
-		tmpl:   tmpl,
-		logger: cfg.Logger,
-		dedup:  newDeduplicator(1000),
-		now:    now,
+		cfg:          cfg,
+		tmpl:         tmpl,
+		logger:       cfg.Logger,
+		dedup:        newDeduplicator(1000),
+		now:          now,
+		inactiveBody: renderInactiveBody(cfg.BaseURL, cfg.Logger),
 	}
 
 	mux := http.NewServeMux()
@@ -185,9 +197,11 @@ func (s *Server) handleRoom(w http.ResponseWriter, r *http.Request) {
 
 	// Registry gate (#7). A non-empty path must either be a registered room
 	// inside its valid window, or be accompanied by a valid moderator JWT.
-	// Empty path with no registry-bypass is also rejected.
+	// The empty path (and any other blocked slug) falls through to the single
+	// inactive-room response (#13), which is identical across every blocked
+	// state so it cannot be used as a room-existence oracle.
 	if !s.gateAllows(path, r) {
-		http.NotFound(w, r)
+		s.renderInactiveRoom(w)
 		return
 	}
 
@@ -202,9 +216,43 @@ func (s *Server) handleRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	if err := s.tmpl.Execute(w, data); err != nil {
 		s.logger.Error("template render failed", "error", err)
 	}
+}
+
+// renderInactiveRoom writes the fixed inactive-room page with HTTP 404. Headers
+// and body are constant, so every blocked slug and every blocked state produce
+// an identical response (#13, AC13.1). Cache-Control: no-store keeps an expired
+// window from being replayed from cache (AC13.4).
+func (s *Server) renderInactiveRoom(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Cache-Control", "no-store")
+	h.Set("Content-Length", strconv.Itoa(len(s.inactiveBody)))
+	w.WriteHeader(http.StatusNotFound)
+	w.Write(s.inactiveBody)
+}
+
+// renderInactiveBody pre-renders the inactive-room page once at construction.
+// It reuses the moderator-auth page template for banner/domain styling (#13),
+// with no form and the fixed inactive copy.
+func renderInactiveBody(baseURL string, logger *slog.Logger) []byte {
+	_, domainFirst, domainRest := parseDomain(baseURL)
+	tmpl := template.Must(template.New("inactive").Parse(moderatorAuthPageHTML))
+	var buf bytes.Buffer
+	err := tmpl.Execute(&buf, moderatorAuthPageData{
+		Title:       "Inactive",
+		Heading:     "Inactive",
+		Message:     inactiveRoomMessage,
+		DomainFirst: domainFirst,
+		DomainRest:  domainRest,
+	})
+	if err != nil && logger != nil {
+		logger.Error("inactive page render failed", "error", err)
+	}
+	return buf.Bytes()
 }
 
 // parseDomain extracts the domain from a URL and splits it into the first
