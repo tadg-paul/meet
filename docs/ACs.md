@@ -3,7 +3,7 @@
 This is the canonical spec. ACs introduced from 2026-08-04 onward live here.
 Pre-cutover ACs remain in their originating issues until cited or migrated.
 
-Last migrated: AC12.8 from #12 on 2026-08-04
+Last migrated: AC13.4 from #13 on 2026-08-05
 
 ---
 
@@ -94,5 +94,53 @@ Last migrated: AC12.8 from #12 on 2026-08-04
   - ✅ RT-12.30: The CLI sends or prints a room-scoped magic link for an authorized email-room pair using the same config and secrets cascade as the service.
   - ✅ RT-12.31: The CLI rejects an unauthorized email-room pair without creating a verifier-accepted token.
   - ✅ RT-12.32: A CLI-generated room-scoped magic link produces a moderator JWT for the authorized room only.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+---
+
+## Room Access Gate
+
+### AC13.1 - Given any public single-segment meeting-room path that is not active now, the response is HTTP 404 carrying H1 `Inactive` and the configured inactive-room explanation, and that response is identical in status code, response headers, and body bytes across every blocked state (unregistered, before-window, after-window, cancelled), disclosing nothing about whether the slug is registered.
+
+- Introduced: #13 (closed 2026-08-05)
+- Tests:
+  - ✅ RT-13.1: A guest loading an unregistered top-level slug receives HTTP 404 with H1 `Inactive` and the specified explanatory paragraph.
+  - ✅ RT-13.2: A guest loading a registered room before its active window receives HTTP 404 with the same inactive-room page.
+  - ✅ RT-13.3: A guest loading a registered room after its active window receives HTTP 404 with the same inactive-room page.
+  - ✅ RT-13.4: A guest loading a cancelled latest room row receives HTTP 404 with the same inactive-room page.
+  - ✅ RT-13.5: The responses for unregistered, before-window, after-window, and cancelled top-level slugs are byte-for-byte identical in status code, response headers, and body.
+  - ✅ RT-13.6: A blocked top-level slug response contains no 8x8/JaaS meeting embed payload.
+  - ✅ RT-13.12: A `HEAD` request, and a request with a disallowed method, to a blocked top-level slug returns the same status and headers as the `GET` inactive response, with no `Content-Length` or other header that varies by blocked state.
+  - ✅ RT-13.13: A request to `/` (the empty top-level segment) without a moderator bypass returns the same inactive-room response as any other blocked slug.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC13.2 - Given a path that is not a single-segment meeting-room slug, inactive-room messaging is absent from route-specific non-room responses; in particular the `/<room>/moderator` entry response does not vary with the room's registry state, so it cannot be used as an oracle for slug validity.
+
+- Introduced: #13 (closed 2026-08-05)
+- Tests:
+  - ✅ RT-13.7: `GET /room/moderator` keeps the moderator entry page and does not contain the inactive-room message.
+  - ✅ RT-13.8: `GET /bad/name` keeps the invalid-room response and does not contain the inactive-room message.
+  - ✅ RT-13.9: `GET /bad/name/moderator` keeps non-moderator-route handling and does not contain the inactive-room message.
+  - ✅ RT-13.14: `GET /<active-room>/moderator` and `GET /<never-registered-room>/moderator` return the same moderator entry response, with no difference in status, headers, or body attributable to registry state.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC13.3 - Given public access to an active single-segment meeting-room path, the meeting page remains available and the inactive-room page is not shown; and no public response distinguishes a previously-valid slug from a never-registered one.
+
+- Introduced: #13 (closed 2026-08-05)
+- Tests:
+  - ✅ RT-13.10: A guest loading a room during its active window receives the meeting page rather than the inactive-room page.
+  - ✅ RT-13.11: The public response for a slug whose latest row is cancelled, or whose active window has passed, is byte-for-byte identical in status code, response headers, and body to the response for a never-registered slug.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC13.4 - Given the inactive-room page and the meeting page, both responses instruct clients not to store the response, so an expired or cancelled window cannot be replayed from a browser or proxy cache.
+
+- Introduced: #13 (closed 2026-08-05)
+- Tests:
+  - ✅ RT-13.15: The inactive-room response sets `Cache-Control: no-store`.
+  - ✅ RT-13.16: The meeting-page response sets `Cache-Control: no-store`.
 
 **Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
