@@ -78,6 +78,8 @@ type Server struct {
 	// inactiveBody is the pre-rendered inactive-room page (#13). It is fixed
 	// at construction so every blocked slug emits byte-identical output.
 	inactiveBody []byte
+	// timers is the shared per-room meeting timer (#15).
+	timers *TimerHub
 }
 
 type pageData struct {
@@ -104,6 +106,19 @@ func New(cfg Config) *Server {
 		now:          now,
 		inactiveBody: renderInactiveBody(cfg.BaseURL, cfg.Logger),
 	}
+
+	// Timer settings persist to the state directory when one is configured;
+	// without it the timer runs with default config and rejects set (#15).
+	var timerSettings *TimerSettingsLog
+	if cfg.DataDir != "" {
+		ts, err := NewTimerSettingsLog(cfg.DataDir)
+		if err != nil {
+			cfg.Logger.Error("failed to open timer settings log", "error", err)
+		} else {
+			timerSettings = ts
+		}
+	}
+	s.timers = NewTimerHub(timerSettings, now, cfg.Logger)
 
 	mux := http.NewServeMux()
 
@@ -186,6 +201,14 @@ func (s *Server) handleRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	if room, ok := moderatorRoute(path, "moderator/verify"); ok {
 		s.handleModeratorVerify(w, r, room)
+		return
+	}
+	if room, ok := timerRoute(path, "timer/events"); ok {
+		s.handleTimerEvents(w, r, room)
+		return
+	}
+	if room, ok := timerRoute(path, "timer"); ok {
+		s.handleTimer(w, r, room)
 		return
 	}
 
