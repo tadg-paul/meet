@@ -98,7 +98,9 @@
             min-height: 0;
         }
     </style>
+    <link rel="stylesheet" href="/static/timer.css">
     <script src='https://8x8.vc/{{.AppID}}/external_api.js' async></script>
+    <script src="/static/timer.js" defer></script>
     <script>
         window.onload = () => {
             const params = new URLSearchParams(location.search);
@@ -112,6 +114,9 @@
                 opts.jwt = jwt;
             }
             const api = new JitsiMeetExternalAPI("8x8.vc", opts);
+            if (window.initTimer) {
+                window.initTimer(api, jwt);
+            }
             api.addEventListener('videoConferenceJoined', () => {
                 api.executeCommand('setTileView', true);
 
@@ -150,12 +155,17 @@
 </head>
 <body>
     <div class="banner">
+        <div class="timer" id="timer">
+            <span class="timer-num" id="timer-num"></span>
+            <div class="timer-ctrls" id="timer-ctrls"></div>
+        </div>
         <a href="/">
             <span class="domain-highlight">{{.DomainFirst}}</span><span class="domain-dim">{{.DomainRest}}</span>
         </a>
         <div class="banner-controls">
             <button id="rec-btn" class="rec-btn">RECORD</button>
         </div>
+        <div class="timer-config" id="timer-config" hidden></div>
     </div>
     <div id="jaas-container"></div>
 </body>

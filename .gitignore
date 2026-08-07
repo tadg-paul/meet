@@ -37,3 +37,7 @@ config/localhost.yaml
 # so Go's //go:embed can reach them).
 cmd/meet-helper/help.txt
 cmd/meet/help-*.txt
+
+# Timer chime assets (#15) are legitimate embedded project media; re-include
+# them despite the global *.mp3 ignore in the user's git template.
+!internal/server/static/sounds/*.mp3
