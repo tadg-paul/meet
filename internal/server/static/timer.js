@@ -187,8 +187,16 @@ window.initTimer = (api, jwt) => {
             return;
         }
         const cfg = anchor.cfg;
-        const e = Math.floor(anchor.running ? localElapsed() : anchor.baseElapsed);
-        const st = compute(e, cfg, anchor.extended);
+        let st = { phase: 'stopped', remaining: 0, countUp: 0 };
+        if (anchor.active) {
+            const e = Math.floor(anchor.running ? localElapsed() : anchor.baseElapsed);
+            st = compute(e, cfg, anchor.extended);
+            if (st.phase === 'stopped') {
+                // Local auto-reset once the grace flash window has elapsed.
+                anchor.active = false;
+                anchor.running = false;
+            }
+        }
         const active = st.phase !== 'stopped';
         const cur = { phase: st.phase, active, running: anchor.running && active };
 
@@ -212,10 +220,6 @@ window.initTimer = (api, jwt) => {
 
         setBanner(st.phase);
         renderControls(cur);
-
-        if (!active && anchor.running) {
-            anchor.running = false; // stop ticking after auto-reset
-        }
     };
 
     // --- moderator controls ---
@@ -344,6 +348,7 @@ window.initTimer = (api, jwt) => {
             baseElapsed: view.elapsed,
             baseAt: performance.now(),
             running: view.running,
+            active: view.phase !== 'stopped',
             cfg: view.config,
             extended: view.extended,
         };
