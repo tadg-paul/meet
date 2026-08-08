@@ -9,7 +9,7 @@ BUILD_OUTPUT := ./bin/$(APP)
 CONFIG_PATH  := config/localhost.yaml
 SECRETS_PATH := secrets/localhost.yaml
 
-.PHONY: build test test-one-off lint clean install uninstall init serve sync release
+.PHONY: build test test-one-off lint clean install uninstall init serve sync
 
 build: stage-help-text
 	@echo "==> building $(APP) for $$(go env GOOS)/$$(go env GOARCH)"
@@ -92,15 +92,3 @@ sync:
 	git commit -m "sync: $$(date -u +%Y-%m-%dT%H:%M:%SZ)" || true
 	git pull
 	git push
-
-release:
-ifndef SKIP_TESTS
-	$(MAKE) test
-endif
-	@current=$$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0"); \
-	major=$$(echo "$$current" | sed 's/^v//' | cut -d. -f1); \
-	minor=$$(echo "$$current" | sed 's/^v//' | cut -d. -f2); \
-	next="v$$major.$$((minor + 1))"; \
-	echo "==> tagging $$next (was $$current)"; \
-	git tag "$$next"; \
-	git push origin "$$next"

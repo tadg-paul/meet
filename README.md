@@ -64,7 +64,6 @@ make token ROOM=x   # generate a moderator JWT URL for a room
 make test           # lint + regression tests
 make install        # symlink meet and meet-helper to ~/.local/bin
 make sync           # git add/commit/pull/push
-make release        # tag and push a new version
 ```
 
 ## Config
