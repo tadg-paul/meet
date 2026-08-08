@@ -292,10 +292,10 @@ window.initTimer = (api, jwt) => {
                 <div class="row"><input id="tc-total" type="text" inputmode="numeric" placeholder="mm:ss"></div>
             </label>
             <label>Early warning
-                <div class="row"><input id="tc-warn" type="number" min="0" max="100"> <span class="computed" id="tc-warn-c"></span></div>
+                <div class="row"><input id="tc-warn" type="number" min="0" max="100"><span class="pct">%</span><span class="eq">=</span><span class="computed" id="tc-warn-c"></span></div>
             </label>
             <label>Grace
-                <div class="row"><input id="tc-grace" type="number" min="0" max="100"> <span class="computed" id="tc-grace-c"></span></div>
+                <div class="row"><input id="tc-grace" type="number" min="0" max="100"><span class="pct">%</span><span class="eq">=</span><span class="computed" id="tc-grace-c"></span></div>
             </label>
             <div class="actions">
                 <button class="timer-btn" type="button" id="tc-cancel">CANCEL</button>
@@ -310,8 +310,8 @@ window.initTimer = (api, jwt) => {
             const total = parseMMSS(totalEl.value) || 0;
             const warn = Number(warnEl.value) || 0;
             const grace = Number(graceEl.value) || 0;
-            warnC.textContent = `(${fmt(Math.round((total * warn) / 100))})`;
-            graceC.textContent = `(${fmt(Math.round((total * grace) / 100))})`;
+            warnC.textContent = fmt(Math.round((total * warn) / 100));
+            graceC.textContent = fmt(Math.round((total * grace) / 100));
         };
         [totalEl, warnEl, graceEl].forEach((el) => el.addEventListener('input', recompute));
         configEl.querySelector('#tc-cancel').addEventListener('click', () => { configEl.hidden = true; });
