@@ -3,7 +3,7 @@
 This is the canonical spec. ACs introduced from 2026-08-04 onward live here.
 Pre-cutover ACs remain in their originating issues until cited or migrated.
 
-Last migrated: AC13.4 from #13 on 2026-08-05
+Last migrated: AC15.16 from #15 on 2026-08-08
 
 ---
 
@@ -142,5 +142,173 @@ Last migrated: AC13.4 from #13 on 2026-08-05
 - Tests:
   - ✅ RT-13.15: The inactive-room response sets `Cache-Control: no-store`.
   - ✅ RT-13.16: The meeting-page response sets `Cache-Control: no-store`.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+---
+
+## Meeting Timer
+
+UT-15.1 through UT-15.14 were confirmed passing by the operator on 2026-08-08.
+
+### AC15.1 - Given a timer configuration of total time, early-warning percent, and grace percent, the room stores the configuration and its derived early-warning threshold and grace limit in whole seconds rounded to the nearest second; a configuration whose total is not positive, or whose early-warning or grace percent falls outside 0 to 100, is not stored.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.1: A 5:00 total with a 10% early-warning yields a threshold 30s before the total.
+  - ✅ RT-15.2: A 15:00 total with a 30% grace yields a 4:30 grace limit.
+  - ✅ RT-15.3: A percentage that does not divide evenly is rounded to the nearest second.
+  - ✅ RT-15.4: A total of zero or negative leaves no stored configuration.
+  - ✅ RT-15.5: An early-warning or grace percent below 0 or above 100 leaves no stored configuration.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.2 - Given a started timer, the room's reported phase is running-before-warning while run-elapsed is under the early-warning threshold, running-after-warning from the threshold until the total, grace (counting up from zero) from the total until the grace limit, and grace-exceeded once the grace limit passes; reported remaining time before the total and reported count-up after the total track the clock.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.6: Just before the threshold, the phase is running-before-warning.
+  - ✅ RT-15.7: At and after the threshold but before the total, the phase is running-after-warning.
+  - ✅ RT-15.8: At the total, the phase is grace with a count-up of zero.
+  - ✅ RT-15.9: Within grace, the reported count-up matches elapsed-since-total.
+  - ✅ RT-15.10: At the grace limit, the phase is grace-exceeded.
+  - ✅ RT-15.11: Reported remaining before the total matches total-minus-elapsed.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.3 - Given a paused timer, run-elapsed does not advance while wall-clock time passes, and resuming continues from the frozen run-elapsed.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.12: After a pause, a wall-clock advance leaves the phase and remaining unchanged.
+  - ✅ RT-15.13: After a resume, a wall-clock advance progresses the phase and remaining from the frozen point.
+  - ✅ RT-15.14: A pause in the running-after-warning phase holds that phase across a wall-clock advance.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.4 - After a reset or stop, the room has no active timer and retains its configuration; after a restart, the retained configuration runs from zero run-elapsed.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.15: After a reset, the room is stopped and a subsequent start reuses the retained settings.
+  - ✅ RT-15.16: After a restart, the timer runs from zero with the same configuration.
+  - ✅ RT-15.17: A stop from the grace phase leaves the room stopped.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.5 - Given a timer that reaches its grace limit, without an extend action the room is grace-exceeded and, after the ten-second flash window, stopped; an extend action taken during grace keeps the count-up active past the grace limit until a stop.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.18: Reaching the grace limit without an extend yields grace-exceeded, then stopped after the flash window.
+  - ✅ RT-15.19: An extend during grace keeps the timer active and counting past the grace limit.
+  - ✅ RT-15.20: A stop after an extend leaves the room stopped.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.6 - A timer control action (set, start, pause, resume, reset, restart, stop, extend) changes the room's timer only when the request carries a valid moderator token scoped to that room or a wildcard token; without one, the timer state is unchanged.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.21: A control action with no token leaves the state unchanged.
+  - ✅ RT-15.22: A control action with an invalid or expired token leaves the state unchanged.
+  - ✅ RT-15.23: A control action with a room-scoped token for a different room leaves the state unchanged.
+  - ✅ RT-15.24: A control action with a room-scoped token for this room is applied.
+  - ✅ RT-15.25: A control action with a wildcard super-moderator token is applied.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.7 - A participant's timer subscription reflects the room's current timer state on connect and each subsequent state change; a subscription opened mid-timer reflects the in-progress phase and remaining, not a stopped state.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.26: A new subscription carries the current state as its first message.
+  - ✅ RT-15.27: A subscription opened after the timer started carries the in-progress phase, not a stopped state.
+  - ✅ RT-15.28: A pause applied after a subscription opens is carried to that subscription.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.8 - A room holds a single timer whose state reflects the most recently applied control action, and every subscriber to that room observes the same state.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.29: Two sequential control actions from different moderator tokens converge to the later action's state.
+  - ✅ RT-15.30: Two concurrent subscriptions observe identical post-action state.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.9 - Timers are independent per room: a control action on one room's timer leaves other rooms' timers unchanged.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.31: Starting a timer in one room leaves a second room with no active timer.
+  - ✅ RT-15.32: Two rooms run timers at independent phases concurrently.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.10 - The banner colour reflects the timer phase for every participant: blue when no timer is active, green before the early-warning, amber after the early-warning, red during grace, and black alternating with red about once per second for ten seconds once grace is exceeded, returning to blue on reset; numerals stay legible against each colour.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ UT-15.1: A participant observes the banner move blue to green to amber to red across a run, with legible numerals throughout.
+  - ✅ UT-15.2: A participant observes the grace-exceeded black/red flash for about ten seconds and the return to blue on auto-reset.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.11 - The banner presents moderators the phase-appropriate controls (stopped: Set, Start; running: Pause; paused: Resume, Reset, Restart; grace: Extend, Stop) and presents non-moderators no controls and numerals only while a timer is active, including the grace count-up.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ UT-15.3: A moderator sees the correct control set in each phase.
+  - ✅ UT-15.4: A non-moderator sees the countdown and grace count-up but never any control.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.12 - Every participant hears a start chime when the timer starts, a pause chime when it is paused, a resume chime when it resumes, the early-warning ding on entering the amber phase, the end chime at the total, and the end-of-grace chime when the grace limit passes, with audio armed on join so the first cue is not suppressed by the browser.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ UT-15.5: All participants hear the start chime, warning ding, end chime, and end-of-grace chime at the correct moments across a run.
+  - ✅ UT-15.6: A participant who has joined the meeting hears the start chime rather than having it blocked by autoplay policy.
+  - ✅ UT-15.14: All participants hear the pause chime when the timer is paused and the resume chime when it is resumed.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.13 - The configuration control presents total as mm:ss and early-warning and grace as percentages, and shows the mm:ss computed from each percentage, updating as the values change.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ UT-15.7: On opening, the popover shows the correct computed mm:ss beside the early-warning and grace percentages for the current total.
+  - ✅ UT-15.8: Editing the total or either percentage updates the computed mm:ss live.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.14 - On a narrow (mobile) viewport the active timer and its controls remain usable without overflowing the banner or obscuring the domain.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ UT-15.9: The banner with an active timer and the moderator control set remains usable at a phone width.
+  - ✅ UT-15.10: The non-moderator banner with an active timer remains usable at a phone width without obscuring the domain.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.15 - While any of the six chimes plays, a participant whose microphone is unmuted has it muted for that chime's duration and restored to unmuted when the chime ends; a participant whose microphone is already muted stays muted throughout.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ UT-15.11: With an unmuted microphone, a participant's microphone mutes for the duration of a chime and returns to unmuted after it ends.
+  - ✅ UT-15.12: With an already-muted microphone, the microphone stays muted across a chime and is not unmuted.
+  - ✅ UT-15.13: On a second participant's device, a chime playing on the first participant's device is not heard re-broadcast into the meeting.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC15.16 - A room's timer configuration persists across a server restart: after a fresh server construction the room's stored configuration is the one last set, and a room with no configuration set has the system defaults. The live running state (running, paused, elapsed) does not persist and is cleared by a restart.
+
+- Introduced: #15 (closed 2026-08-08)
+- Tests:
+  - ✅ RT-15.33: After a configuration is set and the server is reconstructed, the room's configuration matches the last set values.
+  - ✅ RT-15.34: A later configuration set supersedes an earlier one across a reconstruction (last-row-wins).
+  - ✅ RT-15.35: A room with no configuration set has the system defaults after a reconstruction.
+  - ✅ RT-15.36: After a reconstruction, a room that had a running timer has no active timer but retains its configuration.
 
 **Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
