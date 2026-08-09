@@ -132,7 +132,12 @@ window.initTimer = (api, jwt) => {
     };
 
     let flashTimer = null;
+    let bannerPhase = null;
     const setBanner = (phase) => {
+        if (phase === bannerPhase) {
+            return; // unchanged: leave any running flash interval alone
+        }
+        bannerPhase = phase;
         banner.classList.remove(...phaseClasses, 'flash-on');
         if (flashTimer) {
             clearInterval(flashTimer);
