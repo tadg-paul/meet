@@ -147,10 +147,13 @@ func TestCLI_Create_StoredFormatRoundTrips_RT7_9(t *testing.T) {
 		t.Fatalf("create exit=%d", code)
 	}
 	csv := readRoomsCSV(t, dir)
-	// Header must be canonical so the server can read it back.
-	wantHeader := "timestamp,room,status,valid_from,valid_until,note\n"
+	// Header must be canonical so the server can read it back. The recurrence
+	// columns were appended by #17; one-off rows leave them empty.
+	wantHeader := "timestamp,room,status,valid_from,valid_until,note," +
+		"recur_kind,recur_interval,recur_ordinal,recur_weekday," +
+		"recur_duration_s,recur_lead_s,recur_ends\n"
 	if !strings.HasPrefix(csv, wantHeader) {
-		t.Errorf("rooms.csv header = %q, want %q", csv[:min(len(csv), 80)], wantHeader)
+		t.Errorf("rooms.csv header = %q, want %q", csv[:min(len(csv), 120)], wantHeader)
 	}
 	if !strings.Contains(csv, ",foo,created,2026-05-25T19:00:00Z,2026-05-25T21:00:00Z,") {
 		t.Errorf("rooms.csv missing canonical row; got:\n%s", csv)

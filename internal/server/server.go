@@ -327,6 +327,11 @@ func (s *Server) gateAllows(path string, r *http.Request) bool {
 		return false
 	}
 	now := s.now()
+	if entry.Recurrence != nil {
+		// Recurring definition (#17): active during a current occurrence,
+		// anchored at ValidFrom.
+		return entry.Recurrence.ActiveAt(entry.ValidFrom, now)
+	}
 	if now.Before(entry.ValidFrom) || now.After(entry.ValidUntil) {
 		return false
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -32,6 +33,10 @@ type RoomLogEntry struct {
 	ValidFrom  time.Time
 	ValidUntil time.Time
 	Note       string
+	// Recurrence, when non-nil, makes this a recurring definition (#17): the
+	// row's ValidFrom is the anchor and ValidUntil is unused. Nil means a
+	// one-off window as in #7.
+	Recurrence *Recurrence
 }
 
 // RoomsLog manages an append-only CSV of room lifecycle events.
@@ -70,7 +75,11 @@ func NewRoomsLog(stateDir string) (*RoomsLog, error) {
 }
 
 func roomsLogHeader() []string {
-	return []string{"timestamp", "room", "status", "valid_from", "valid_until", "note"}
+	return []string{
+		"timestamp", "room", "status", "valid_from", "valid_until", "note",
+		"recur_kind", "recur_interval", "recur_ordinal", "recur_weekday",
+		"recur_duration_s", "recur_lead_s", "recur_ends",
+	}
 }
 
 // Append writes a new entry to the log.
@@ -172,7 +181,7 @@ func (l *RoomsLog) readAll() ([]RoomLogEntry, error) {
 }
 
 func encodeEntry(e RoomLogEntry) []string {
-	return []string{
+	row := []string{
 		e.Timestamp.UTC().Format(time.RFC3339),
 		e.Room,
 		string(e.Status),
@@ -180,6 +189,19 @@ func encodeEntry(e RoomLogEntry) []string {
 		formatOptional(e.ValidUntil),
 		e.Note,
 	}
+	if e.Recurrence != nil {
+		r := e.Recurrence
+		row = append(row,
+			string(r.Kind),
+			strconv.Itoa(r.IntervalWeeks),
+			strconv.Itoa(r.Ordinal),
+			strconv.Itoa(int(r.Weekday)),
+			strconv.Itoa(int(r.Duration/time.Second)),
+			strconv.Itoa(int(r.Lead/time.Second)),
+			formatOptional(r.Ends),
+		)
+	}
+	return row
 }
 
 func formatOptional(t time.Time) string {
@@ -305,5 +327,31 @@ func decodeEntry(rec []string) (RoomLogEntry, bool) {
 	if len(rec) >= 6 {
 		e.Note = rec[5]
 	}
+	if len(rec) >= 13 && rec[6] != "" {
+		e.Recurrence = decodeRecurrence(rec)
+	}
 	return e, true
+}
+
+func decodeRecurrence(rec []string) *Recurrence {
+	interval, _ := strconv.Atoi(rec[7])
+	ordinal, _ := strconv.Atoi(rec[8])
+	weekday, _ := strconv.Atoi(rec[9])
+	durationSecs, _ := strconv.Atoi(rec[10])
+	leadSecs, _ := strconv.Atoi(rec[11])
+	var ends time.Time
+	if rec[12] != "" {
+		if t, err := time.Parse(time.RFC3339, rec[12]); err == nil {
+			ends = t
+		}
+	}
+	return &Recurrence{
+		Kind:          RecurKind(rec[6]),
+		IntervalWeeks: interval,
+		Ordinal:       ordinal,
+		Weekday:       time.Weekday(weekday),
+		Duration:      time.Duration(durationSecs) * time.Second,
+		Lead:          time.Duration(leadSecs) * time.Second,
+		Ends:          ends,
+	}
 }
