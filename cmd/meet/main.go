@@ -621,6 +621,8 @@ func runCreate(args []string) {
 		}
 		fmt.Printf("created %s [%s, anchor %s]\n",
 			*roomFlag, *repeatFlag, entry.ValidFrom.UTC().Format(time.RFC3339))
+		fmt.Println("next occurrences:")
+		printOccurrences(entry.Recurrence.NextOccurrences(entry.ValidFrom, now, 7), *entry.Recurrence, 6)
 		return
 	}
 
@@ -792,9 +794,42 @@ func parseWeekday(s string) (time.Weekday, error) {
 func parseTimeOfDay(s string) (hour, minute int, err error) {
 	t, err := time.Parse("15:04", strings.TrimSpace(s))
 	if err != nil {
-		return 0, 0, fmt.Errorf("--at must be HH:MM (UTC): %w", err)
+		return 0, 0, fmt.Errorf("--at must be HH:MM: %w", err)
 	}
 	return t.Hour(), t.Minute(), nil
+}
+
+// printOccurrences prints up to limit occurrences (start .. end), in the zone
+// when set plus UTC, and a trailing note when more remain.
+func printOccurrences(occ []time.Time, rec server.Recurrence, limit int) {
+	loc := time.UTC
+	if rec.Tz != "" {
+		if l, err := time.LoadLocation(rec.Tz); err == nil {
+			loc = l
+		}
+	}
+	more := false
+	if len(occ) > limit {
+		occ = occ[:limit]
+		more = true
+	}
+	for _, start := range occ {
+		end := start.Add(rec.Duration)
+		if rec.Tz != "" {
+			fmt.Printf("  %s .. %s  (%s .. %s UTC)\n",
+				start.In(loc).Format("Mon 2006-01-02 15:04 MST"),
+				end.In(loc).Format("15:04 MST"),
+				start.UTC().Format("15:04"),
+				end.UTC().Format("15:04"))
+		} else {
+			fmt.Printf("  %s .. %s UTC\n",
+				start.UTC().Format("Mon 2006-01-02 15:04"),
+				end.UTC().Format("15:04"))
+		}
+	}
+	if more {
+		fmt.Println("  ... and more occurrences")
+	}
 }
 
 func parseCreateTime(raw string) (time.Time, error) {
@@ -854,7 +889,9 @@ func runList(args []string) {
 		fmt.Fprint(os.Stderr, helpList)
 	}
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
-	filterFlag := fs.String("filter", "all", "all | active | upcoming | past | cancelled")
+	filterFlag := fs.String("filter", "current", "current | all | active | upcoming | past | cancelled")
+	roomFlag := fs.String("room", "", "list a room's upcoming occurrences instead of all rooms")
+	countFlag := fs.Int("count", 6, "max occurrences to show with --room")
 	fs.Parse(args)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -869,12 +906,24 @@ func runList(args []string) {
 		fmt.Fprintf(os.Stderr, "error: opening rooms registry: %v\n", err)
 		os.Exit(1)
 	}
-	entries, err := server.ListRooms(rooms, server.RoomFilter(*filterFlag), time.Now())
+	now := time.Now()
+
+	if *roomFlag != "" {
+		listOccurrences(rooms, *roomFlag, *countFlag, now)
+		return
+	}
+
+	entries, err := server.ListRooms(rooms, server.RoomFilter(*filterFlag), now)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 	for _, e := range entries {
+		if e.Recurrence != nil {
+			fmt.Printf("%-30s  %-10s  %s (anchor %s)  %s\n",
+				e.Room, e.Status, e.Recurrence.Kind, e.ValidFrom.UTC().Format(time.RFC3339), e.Note)
+			continue
+		}
 		from := "-"
 		until := "-"
 		if !e.ValidFrom.IsZero() {
@@ -885,6 +934,32 @@ func runList(args []string) {
 		}
 		fmt.Printf("%-30s  %-10s  %s  ..  %s  %s\n", e.Room, e.Status, from, until, e.Note)
 	}
+}
+
+// listOccurrences prints a room's upcoming occurrences (recurring), or its
+// window (one-off), or a not-found note.
+func listOccurrences(rooms *server.RoomsLog, room string, count int, now time.Time) {
+	entry := rooms.LatestByRoom(room)
+	if entry == nil || entry.Status != server.RoomCreated {
+		fmt.Printf("no active or upcoming meeting for %q\n", room)
+		return
+	}
+	if entry.Recurrence != nil {
+		occ := entry.Recurrence.NextOccurrences(entry.ValidFrom, now, count+1)
+		if len(occ) == 0 {
+			fmt.Printf("no upcoming occurrences for %q\n", room)
+			return
+		}
+		fmt.Printf("upcoming occurrences of %s:\n", room)
+		printOccurrences(occ, *entry.Recurrence, count)
+		return
+	}
+	if now.After(entry.ValidUntil) {
+		fmt.Printf("no upcoming occurrences for %q\n", room)
+		return
+	}
+	fmt.Printf("%s  %s  ..  %s\n", room,
+		entry.ValidFrom.UTC().Format(time.RFC3339), entry.ValidUntil.UTC().Format(time.RFC3339))
 }
 
 // stateDir returns the directory the rooms registry (and other state files)

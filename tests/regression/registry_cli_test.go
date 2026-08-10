@@ -309,7 +309,7 @@ func TestCLI_List_All_RT7_15(t *testing.T) {
 			t.Fatalf("create %s exit=%d", name, code)
 		}
 	}
-	stdout, _, code := runMeet(t, dir, "list")
+	stdout, _, code := runMeet(t, dir, "list", "--filter", "all")
 	if code != 0 {
 		t.Fatalf("list exit=%d", code)
 	}
@@ -428,7 +428,7 @@ func TestCLI_Persistence_RegisteredSurvivesAcrossExec_RT7_23(t *testing.T) {
 		t.Fatalf("create exit=%d", code)
 	}
 	// Fresh exec — simulates restart.
-	stdout, _, code := runMeet(t, dir, "list")
+	stdout, _, code := runMeet(t, dir, "list", "--filter", "all")
 	if code != 0 {
 		t.Fatalf("list exit=%d", code)
 	}
@@ -599,5 +599,78 @@ func TestCLI_Create_MonthlyTzLocalTime_RT18_10(t *testing.T) {
 	}
 	if !strings.Contains(csv, "America/Detroit") {
 		t.Errorf("timezone not stored; got:\n%s", csv)
+	}
+}
+
+// #19 / RT-19.5 — creating an unbounded recurring room previews occurrences
+// and notes that more remain.
+func TestCLI_Create_PreviewMore_RT19_5(t *testing.T) {
+	dir := t.TempDir()
+	stdout, stderr, code := runMeet(t, dir, "create", "--room", "wk",
+		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "next occurrences:") || !strings.Contains(stdout, "2026-08-11") {
+		t.Errorf("create did not preview occurrences; got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "and more occurrences") {
+		t.Errorf("unbounded series did not note more occurrences; got:\n%s", stdout)
+	}
+}
+
+// #19 / RT-19.6 — a bounded series previews only its occurrences with no
+// "more" note.
+func TestCLI_Create_PreviewBounded_RT19_6(t *testing.T) {
+	dir := t.TempDir()
+	stdout, stderr, code := runMeet(t, dir, "create", "--room", "wk",
+		"--repeat", "weekly", "--from", "2026-09-01T19:00:00Z", "--ends", "2026-09-20")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if strings.Contains(stdout, "and more occurrences") {
+		t.Errorf("bounded series should not note more; got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "2026-09-15") {
+		t.Errorf("preview missing an in-range occurrence; got:\n%s", stdout)
+	}
+}
+
+// #19 / RT-19.7 — list --room shows a room's upcoming occurrences.
+func TestCLI_List_RoomOccurrences_RT19_7(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, code := runMeet(t, dir, "create", "--room", "wk",
+		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z"); code != 0 {
+		t.Fatalf("create exit=%d", code)
+	}
+	stdout, _, code := runMeet(t, dir, "list", "--room", "wk")
+	if code != 0 {
+		t.Fatalf("list --room exit=%d", code)
+	}
+	if !strings.Contains(stdout, "upcoming occurrences of wk") {
+		t.Errorf("list --room did not show occurrences; got:\n%s", stdout)
+	}
+}
+
+// #19 / RT-19.8 — the default list shows current/future rooms, not past ones.
+func TestCLI_List_DefaultExcludesPast_RT19_8(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, code := runMeet(t, dir, "create", "--room", "gone",
+		"--from", "2020-01-01T00:00:00Z", "--until", "2020-01-02T00:00:00Z"); code != 0 {
+		t.Fatalf("create gone exit=%d", code)
+	}
+	if _, _, code := runMeet(t, dir, "create", "--room", "future",
+		"--repeat", "weekly", "--from", "2099-01-06T19:00:00Z"); code != 0 {
+		t.Fatalf("create future exit=%d", code)
+	}
+	stdout, _, code := runMeet(t, dir, "list")
+	if code != 0 {
+		t.Fatalf("list exit=%d", code)
+	}
+	if !strings.Contains(stdout, "future") {
+		t.Errorf("default list missing current/future room; got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "gone") {
+		t.Errorf("default list should exclude the past room; got:\n%s", stdout)
 	}
 }

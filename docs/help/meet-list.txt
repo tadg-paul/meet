@@ -1,7 +1,18 @@
-Usage: meet list [--filter all|active|upcoming|past|cancelled]
+Usage:
+  meet list [--filter current|all|active|upcoming|past|cancelled]
+  meet list --room <name> [--count N]
+
+Without --room, lists rooms. The default filter is "current": rooms active now
+or in the future (one-off rooms not yet past, and recurring rooms not past their
+--ends). Use --filter all to include past and cancelled rooms.
+
+With --room, lists that room's upcoming occurrences (for a recurring room) or
+its window (for a one-off), up to --count occurrences (default 6).
 
 Options:
-  --filter <status>   Rooms to show: all, active, upcoming, past, or cancelled.
-                      Default: all.
+  --filter <status>   Rooms to show: current (default), all, active, upcoming,
+                      past, or cancelled.
+  --room <name>       List this room's upcoming occurrences instead of all rooms.
+  --count <n>         Max occurrences to show with --room (default 6).
   --config <paths>    Comma-separated config files. Defaults to auto-discovery
                       from CONFIG_PATH, SECRETS_PATH, and local config files.

@@ -260,6 +260,9 @@ const (
 	FilterUpcoming  RoomFilter = "upcoming"
 	FilterPast      RoomFilter = "past"
 	FilterCancelled RoomFilter = "cancelled"
+	// FilterCurrent is rooms active now or in the future: one-off rooms not yet
+	// past, and recurring rooms not past their end (#19). The default for list.
+	FilterCurrent RoomFilter = "current"
 )
 
 // ListRooms returns rooms matching the given filter, with one entry per room
@@ -288,16 +291,33 @@ func ListRooms(log *RoomsLog, filter RoomFilter, now time.Time) ([]RoomLogEntry,
 }
 
 func matchesFilter(e RoomLogEntry, filter RoomFilter, now time.Time) bool {
-	switch filter {
-	case FilterCancelled:
+	if filter == FilterCancelled {
 		return e.Status == RoomCancelled
+	}
+	if e.Status != RoomCreated {
+		return false
+	}
+	if e.Recurrence != nil {
+		ended := !e.Recurrence.Ends.IsZero() && now.After(e.Recurrence.Ends)
+		switch filter {
+		case FilterActive:
+			return e.Recurrence.ActiveAt(e.ValidFrom, now)
+		case FilterUpcoming, FilterCurrent:
+			return !ended
+		case FilterPast:
+			return ended
+		}
+		return false
+	}
+	switch filter {
 	case FilterActive:
-		return e.Status == RoomCreated &&
-			!now.Before(e.ValidFrom) && !now.After(e.ValidUntil)
+		return !now.Before(e.ValidFrom) && !now.After(e.ValidUntil)
 	case FilterUpcoming:
-		return e.Status == RoomCreated && now.Before(e.ValidFrom)
+		return now.Before(e.ValidFrom)
 	case FilterPast:
-		return e.Status == RoomCreated && now.After(e.ValidUntil)
+		return now.After(e.ValidUntil)
+	case FilterCurrent:
+		return !now.After(e.ValidUntil)
 	}
 	return false
 }

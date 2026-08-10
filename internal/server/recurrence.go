@@ -62,6 +62,75 @@ func (r Recurrence) ActiveAt(anchor, now time.Time) bool {
 	return false
 }
 
+// NextOccurrences returns up to n occurrence start instants that have not yet
+// ended as of `from` (an in-progress or upcoming occurrence), in chronological
+// order, respecting the series end. Used to preview a schedule (#19).
+func (r Recurrence) NextOccurrences(anchor, from time.Time, n int) []time.Time {
+	if n <= 0 {
+		return nil
+	}
+	loc := r.location()
+	switch r.Kind {
+	case RecurWeekly:
+		return r.weeklyNext(anchor, from, n, loc)
+	case RecurMonthly:
+		return r.monthlyNext(anchor, from, n, loc)
+	}
+	return nil
+}
+
+func (r Recurrence) weeklyNext(anchor, from time.Time, n int, loc *time.Location) []time.Time {
+	weeks := r.IntervalWeeks
+	if weeks < 1 {
+		weeks = 1
+	}
+	al := anchor.In(loc)
+	start0 := time.Date(al.Year(), al.Month(), al.Day(), al.Hour(), al.Minute(), al.Second(), 0, loc)
+
+	k := 0
+	if from.After(start0) {
+		k = int(from.Sub(start0).Hours())/(24*7*weeks) - 1
+		if k < 0 {
+			k = 0
+		}
+	}
+	out := make([]time.Time, 0, n)
+	for len(out) < n && k < 1_000_000 {
+		start := start0.AddDate(0, 0, 7*weeks*k)
+		k++
+		if !r.Ends.IsZero() && start.After(r.Ends) {
+			break
+		}
+		if start.Add(r.Duration).Before(from) {
+			continue // already ended
+		}
+		out = append(out, start)
+	}
+	return out
+}
+
+func (r Recurrence) monthlyNext(anchor, from time.Time, n int, loc *time.Location) []time.Time {
+	al := anchor.In(loc)
+	fl := from.In(loc)
+	y, m := addMonths(fl.Year(), fl.Month(), -1) // step back one for a boundary occurrence
+	out := make([]time.Time, 0, n)
+	for iterations := 0; iterations < 1200 && len(out) < n; iterations++ {
+		start, ok := nthWeekdayOfMonth(y, m, r.Ordinal, r.Weekday, al, loc)
+		y, m = addMonths(y, m, 1)
+		if !ok || start.Before(anchor) {
+			continue
+		}
+		if !r.Ends.IsZero() && start.After(r.Ends) {
+			break
+		}
+		if start.Add(r.Duration).Before(from) {
+			continue
+		}
+		out = append(out, start)
+	}
+	return out
+}
+
 func (r Recurrence) weeklyActive(anchor, now time.Time, loc *time.Location) bool {
 	weeks := r.IntervalWeeks
 	if weeks < 1 {

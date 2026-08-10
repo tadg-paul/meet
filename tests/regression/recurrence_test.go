@@ -369,3 +369,46 @@ func TestParseDuration_RejectsMinorOverflow_RT17_38(t *testing.T) {
 		}
 	}
 }
+
+// --- #19: NextOccurrences ---
+
+func TestNext_Weekly_RT19_1(t *testing.T) {
+	a := mustRFC3339(t, "2026-08-11T19:00:00Z")
+	r := weeklyRec(1)
+	got := r.NextOccurrences(a, mustRFC3339(t, "2026-08-11T00:00:00Z"), 3)
+	want := []string{"2026-08-11T19:00:00Z", "2026-08-18T19:00:00Z", "2026-08-25T19:00:00Z"}
+	assertOccurrences(t, got, want)
+}
+
+func TestNext_Fortnightly_RT19_2(t *testing.T) {
+	a := mustRFC3339(t, "2026-08-11T19:00:00Z")
+	got := weeklyRec(2).NextOccurrences(a, mustRFC3339(t, "2026-08-12T00:00:00Z"), 2)
+	assertOccurrences(t, got, []string{"2026-08-25T19:00:00Z", "2026-09-08T19:00:00Z"})
+}
+
+func TestNext_Monthly_RT19_3(t *testing.T) {
+	a := mustRFC3339(t, "2026-08-01T18:00:00Z")
+	got := monthlyRec(2, time.Tuesday).NextOccurrences(a, mustRFC3339(t, "2026-08-15T00:00:00Z"), 2)
+	// 2nd Tuesday: Sep 8, Oct 13 2026
+	assertOccurrences(t, got, []string{"2026-09-08T18:00:00Z", "2026-10-13T18:00:00Z"})
+}
+
+func TestNext_RespectsEnds_RT19_4(t *testing.T) {
+	a := mustRFC3339(t, "2026-08-11T19:00:00Z")
+	r := weeklyRec(1)
+	r.Ends = mustRFC3339(t, "2026-08-20T00:00:00Z") // only Aug 11 and Aug 18 fall before it
+	got := r.NextOccurrences(a, mustRFC3339(t, "2026-08-01T00:00:00Z"), 6)
+	assertOccurrences(t, got, []string{"2026-08-11T19:00:00Z", "2026-08-18T19:00:00Z"})
+}
+
+func assertOccurrences(t *testing.T, got []time.Time, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %d occurrences, want %d: %v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].UTC().Format(time.RFC3339) != w {
+			t.Errorf("occurrence %d = %s, want %s", i, got[i].UTC().Format(time.RFC3339), w)
+		}
+	}
+}
