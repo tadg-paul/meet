@@ -51,12 +51,20 @@ var helpList string
 var Version = "dev"
 
 type appConfig struct {
-	Addr                 string    `yaml:"addr"`
-	BaseURL              string    `yaml:"base_url"`
-	DefaultModeratorName string    `yaml:"default-moderator-name"`
-	Keys8x8              keys8x8   `yaml:"8x8-keys"`
-	Recording            recording `yaml:"recording"`
-	ModeratorAuth        modAuth   `yaml:"moderator-auth"`
+	Addr                 string     `yaml:"addr"`
+	BaseURL              string     `yaml:"base_url"`
+	DefaultModeratorName string     `yaml:"default-moderator-name"`
+	Keys8x8              keys8x8    `yaml:"8x8-keys"`
+	Recording            recording  `yaml:"recording"`
+	ModeratorAuth        modAuth    `yaml:"moderator-auth"`
+	Meeting              meetingCfg `yaml:"meeting"`
+}
+
+// meetingCfg holds create-time defaults for scheduled meetings (#17). Values
+// use the compound duration format (e.g. "4h", "4:30h", "15m").
+type meetingCfg struct {
+	DefaultDuration  string `yaml:"default-duration"`
+	DefaultOpenEarly string `yaml:"default-open-early"`
 }
 
 type recording struct {
@@ -554,18 +562,20 @@ func runCreate(args []string) {
 	configFlag := fs.String("config", "", "comma-separated config files (default: auto from env)")
 	roomFlag := fs.String("room", "", "room name (required)")
 	onFlag := fs.String("on", "", "meeting date YYYY-MM-DD; equivalent to --from dateT00:00:00Z --until dateT23:59:59Z")
-	fromFlag := fs.String("from", "", "valid-from time, RFC3339 or YYYY-MM-DD")
-	untilFlag := fs.String("until", "", "valid-until time, RFC3339 or YYYY-MM-DD")
+	fromFlag := fs.String("from", "", "valid-from time / anchor, RFC3339 or YYYY-MM-DD")
+	untilFlag := fs.String("until", "", "DEPRECATED (use --duration): valid-until time")
 	noteFlag := fs.String("note", "", "free-form note")
+	repeatFlag := fs.String("repeat", "", "recurrence: weekly | fortnightly | monthly")
+	weekdayFlag := fs.String("weekday", "", "weekday for --repeat monthly (e.g. wed)")
+	ordinalFlag := fs.Int("ordinal", 0, "ordinal 1..5 for --repeat monthly")
+	atFlag := fs.String("at", "", "time-of-day UTC HH:MM for --repeat monthly")
+	durationFlag := fs.String("duration", "", "occurrence/window length, e.g. 4:30h")
+	openEarlyFlag := fs.String("open-early", "", "lead before start, e.g. 15m")
+	endsFlag := fs.String("ends", "", "series end date YYYY-MM-DD (for --repeat)")
 	fs.Parse(args)
 
-	if *roomFlag == "" || (*onFlag == "" && (*fromFlag == "" || *untilFlag == "")) {
+	if *roomFlag == "" {
 		fs.Usage()
-		os.Exit(2)
-	}
-	from, until, err := createWindow(*onFlag, *fromFlag, *untilFlag)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(2)
 	}
 
@@ -574,14 +584,51 @@ func runCreate(args []string) {
 	if configPaths == "" {
 		configPaths = buildConfigPaths()
 	}
-	_ = loadConfig(configPaths, logger) // exercise the cascade even if we only need dataDir
+	cfg := loadConfig(configPaths, logger)
+
+	duration, err := resolveDuration(*durationFlag, cfg.Meeting.DefaultDuration, 4*time.Hour)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: --duration: %v\n", err)
+		os.Exit(2)
+	}
+	lead, err := resolveDuration(*openEarlyFlag, cfg.Meeting.DefaultOpenEarly, 15*time.Minute)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: --open-early: %v\n", err)
+		os.Exit(2)
+	}
 
 	rooms, err := server.NewRoomsLog(stateDir())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: opening rooms registry: %v\n", err)
 		os.Exit(1)
 	}
-	if err := server.CreateRoom(rooms, *roomFlag, from, until, *noteFlag, time.Now()); err != nil {
+	now := time.Now()
+
+	if *repeatFlag != "" {
+		entry, err := buildRecurringEntry(recurringArgs{
+			repeat: *repeatFlag, from: *fromFlag, at: *atFlag, weekday: *weekdayFlag,
+			ordinal: *ordinalFlag, ends: *endsFlag, duration: duration, lead: lead,
+			room: *roomFlag, note: *noteFlag, now: now,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(2)
+		}
+		if err := rooms.Append(entry); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("created %s [%s, anchor %s]\n",
+			*roomFlag, *repeatFlag, entry.ValidFrom.UTC().Format(time.RFC3339))
+		return
+	}
+
+	from, until, err := createWindow(*onFlag, *fromFlag, *untilFlag, *durationFlag, duration)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(2)
+	}
+	if err := server.CreateRoom(rooms, *roomFlag, from, until, *noteFlag, now); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -589,7 +636,7 @@ func runCreate(args []string) {
 		*roomFlag, from.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339))
 }
 
-func createWindow(on, fromRaw, untilRaw string) (time.Time, time.Time, error) {
+func createWindow(on, fromRaw, untilRaw, durationRaw string, duration time.Duration) (time.Time, time.Time, error) {
 	if on != "" {
 		if fromRaw != "" || untilRaw != "" {
 			return time.Time{}, time.Time{}, fmt.Errorf("--on cannot be combined with --from or --until")
@@ -601,15 +648,139 @@ func createWindow(on, fromRaw, untilRaw string) (time.Time, time.Time, error) {
 		return day, day.Add(24*time.Hour - time.Second), nil
 	}
 
+	if fromRaw == "" {
+		return time.Time{}, time.Time{}, fmt.Errorf("one-off create needs --on, or --from with --duration (or the deprecated --until)")
+	}
 	from, err := parseCreateTime(fromRaw)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("--from: %w", err)
 	}
-	until, err := parseCreateTime(untilRaw)
-	if err != nil {
-		return time.Time{}, time.Time{}, fmt.Errorf("--until: %w", err)
+	if durationRaw != "" {
+		return from, from.Add(duration), nil
 	}
-	return from, until, nil
+	if untilRaw != "" {
+		until, err := parseCreateTime(untilRaw)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("--until: %w", err)
+		}
+		return from, until, nil
+	}
+	return time.Time{}, time.Time{}, fmt.Errorf("one-off create needs --duration or the deprecated --until")
+}
+
+// resolveDuration picks the flag value, else the config value, else the
+// fallback, parsing the compound duration format.
+func resolveDuration(flagVal, cfgVal string, fallback time.Duration) (time.Duration, error) {
+	if flagVal != "" {
+		return server.ParseDuration(flagVal)
+	}
+	if cfgVal != "" {
+		return server.ParseDuration(cfgVal)
+	}
+	return fallback, nil
+}
+
+type recurringArgs struct {
+	repeat, from, at, weekday, ends, room, note string
+	ordinal                                     int
+	duration, lead                              time.Duration
+	now                                         time.Time
+}
+
+func buildRecurringEntry(a recurringArgs) (server.RoomLogEntry, error) {
+	rec := server.Recurrence{Duration: a.duration, Lead: a.lead}
+	var anchor time.Time
+
+	switch strings.ToLower(a.repeat) {
+	case "weekly", "fortnightly":
+		if a.from == "" {
+			return server.RoomLogEntry{}, fmt.Errorf("--repeat %s needs --from (the first occurrence, RFC3339)", a.repeat)
+		}
+		t, err := time.Parse(time.RFC3339, a.from)
+		if err != nil {
+			return server.RoomLogEntry{}, fmt.Errorf("--from must be RFC3339 for --repeat %s: %w", a.repeat, err)
+		}
+		anchor = t.UTC()
+		rec.Kind = server.RecurWeekly
+		rec.IntervalWeeks = 1
+		if strings.EqualFold(a.repeat, "fortnightly") {
+			rec.IntervalWeeks = 2
+		}
+	case "monthly":
+		if a.weekday == "" || a.ordinal == 0 || a.at == "" {
+			return server.RoomLogEntry{}, fmt.Errorf("--repeat monthly needs --weekday, --ordinal, and --at")
+		}
+		wd, err := parseWeekday(a.weekday)
+		if err != nil {
+			return server.RoomLogEntry{}, err
+		}
+		if a.ordinal < 1 || a.ordinal > 5 {
+			return server.RoomLogEntry{}, fmt.Errorf("--ordinal must be 1..5")
+		}
+		hh, mm, err := parseTimeOfDay(a.at)
+		if err != nil {
+			return server.RoomLogEntry{}, err
+		}
+		start := a.now.UTC()
+		if a.from != "" {
+			d, err := parseCreateTime(a.from)
+			if err != nil {
+				return server.RoomLogEntry{}, fmt.Errorf("--from: %w", err)
+			}
+			start = d.UTC()
+		}
+		anchor = time.Date(start.Year(), start.Month(), start.Day(), hh, mm, 0, 0, time.UTC)
+		rec.Kind = server.RecurMonthly
+		rec.Ordinal = a.ordinal
+		rec.Weekday = wd
+	default:
+		return server.RoomLogEntry{}, fmt.Errorf("--repeat must be weekly, fortnightly, or monthly")
+	}
+
+	if a.ends != "" {
+		d, err := parseDateOnly(a.ends)
+		if err != nil {
+			return server.RoomLogEntry{}, fmt.Errorf("--ends: %w", err)
+		}
+		rec.Ends = d.Add(24*time.Hour - time.Second) // inclusive end of that day
+	}
+
+	return server.RoomLogEntry{
+		Timestamp:  a.now,
+		Room:       a.room,
+		Status:     server.RoomCreated,
+		ValidFrom:  anchor,
+		Note:       a.note,
+		Recurrence: &rec,
+	}, nil
+}
+
+func parseWeekday(s string) (time.Weekday, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "sun", "sunday":
+		return time.Sunday, nil
+	case "mon", "monday":
+		return time.Monday, nil
+	case "tue", "tues", "tuesday":
+		return time.Tuesday, nil
+	case "wed", "weds", "wednesday":
+		return time.Wednesday, nil
+	case "thu", "thur", "thurs", "thursday":
+		return time.Thursday, nil
+	case "fri", "friday":
+		return time.Friday, nil
+	case "sat", "saturday":
+		return time.Saturday, nil
+	}
+	return 0, fmt.Errorf("unknown weekday %q", s)
+}
+
+func parseTimeOfDay(s string) (hour, minute int, err error) {
+	t, err := time.Parse("15:04", strings.TrimSpace(s))
+	if err != nil {
+		return 0, 0, fmt.Errorf("--at must be HH:MM (UTC): %w", err)
+	}
+	return t.Hour(), t.Minute(), nil
 }
 
 func parseCreateTime(raw string) (time.Time, error) {

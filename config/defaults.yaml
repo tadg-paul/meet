@@ -4,6 +4,10 @@ exec_args: serve
 
 default-moderator-name: Modymoody
 
+meeting:
+    default-duration: 4h
+    default-open-early: 15m
+
 recording:
     webdav:
         path: meeting-recordings

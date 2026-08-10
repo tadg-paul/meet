@@ -461,3 +461,124 @@ func TestCLI_Persistence_CancellationSurvivesAcrossExec_RT7_24(t *testing.T) {
 		t.Errorf("filter=cancelled did not list foo after fresh exec: %q", stdout)
 	}
 }
+
+// --- #17: recurrence create, config defaults, validation ---
+
+func writeConfigFile(t *testing.T, dir, content string) string {
+	t.Helper()
+	p := filepath.Join(dir, "cfg.yaml")
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return p
+}
+
+// AC17.8 / RT-17.26 — create --repeat weekly writes a recurring row.
+func TestCLI_Create_Weekly_RT17_26(t *testing.T) {
+	dir := t.TempDir()
+	_, stderr, code := runMeet(t, dir, "create", "--room", "wk",
+		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if csv := readRoomsCSV(t, dir); !strings.Contains(csv, ",weekly,1,0,0,14400,900,") {
+		t.Errorf("rooms.csv missing weekly recurrence row; got:\n%s", csv)
+	}
+}
+
+// AC17.8 / RT-17.27 — create --repeat monthly writes a recurring row.
+func TestCLI_Create_Monthly_RT17_27(t *testing.T) {
+	dir := t.TempDir()
+	_, stderr, code := runMeet(t, dir, "create", "--room", "mo",
+		"--repeat", "monthly", "--ordinal", "1", "--weekday", "wed", "--at", "18:00")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if csv := readRoomsCSV(t, dir); !strings.Contains(csv, ",monthly,0,1,3,14400,900,") {
+		t.Errorf("rooms.csv missing monthly recurrence row; got:\n%s", csv)
+	}
+}
+
+// AC17.8 / RT-17.28 — an unknown weekday is rejected and writes no row.
+func TestCLI_Create_BadWeekday_RT17_28(t *testing.T) {
+	dir := t.TempDir()
+	_, _, code := runMeet(t, dir, "create", "--room", "mo",
+		"--repeat", "monthly", "--ordinal", "1", "--weekday", "funday", "--at", "18:00")
+	if code == 0 {
+		t.Error("bad weekday should exit non-zero")
+	}
+	if strings.Contains(readRoomsCSV(t, dir), "mo,created") {
+		t.Error("bad weekday should write no row")
+	}
+}
+
+// AC17.8 / RT-17.29 — an out-of-range ordinal is rejected and writes no row.
+func TestCLI_Create_BadOrdinal_RT17_29(t *testing.T) {
+	dir := t.TempDir()
+	_, _, code := runMeet(t, dir, "create", "--room", "mo",
+		"--repeat", "monthly", "--ordinal", "9", "--weekday", "wed", "--at", "18:00")
+	if code == 0 {
+		t.Error("bad ordinal should exit non-zero")
+	}
+	if strings.Contains(readRoomsCSV(t, dir), "mo,created") {
+		t.Error("bad ordinal should write no row")
+	}
+}
+
+// AC17.8 / RT-17.32 — --ends records the series end on the row.
+func TestCLI_Create_Ends_RT17_32(t *testing.T) {
+	dir := t.TempDir()
+	_, stderr, code := runMeet(t, dir, "create", "--room", "wk",
+		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z", "--ends", "2026-12-31")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if csv := readRoomsCSV(t, dir); !strings.Contains(csv, "2026-12-31T23:59:59Z") {
+		t.Errorf("rooms.csv missing series end; got:\n%s", csv)
+	}
+}
+
+// AC17.8 / RT-17.33 — the deprecated --until still records a one-off window.
+func TestCLI_Create_DeprecatedUntil_RT17_33(t *testing.T) {
+	dir := t.TempDir()
+	_, stderr, code := runMeet(t, dir, "create", "--room", "one",
+		"--from", "2026-08-11T19:00:00Z", "--until", "2026-08-11T21:00:00Z")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if csv := readRoomsCSV(t, dir); !strings.Contains(csv, "one,created,2026-08-11T19:00:00Z,2026-08-11T21:00:00Z,") {
+		t.Errorf("rooms.csv missing one-off row from --until; got:\n%s", csv)
+	}
+}
+
+// AC17.4 / RT-17.13, RT-17.14 — config defaults for duration and lead are
+// recorded on the row when the flags are omitted.
+func TestCLI_Create_ConfigDefaults_RT17_13_RT17_14(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfigFile(t, dir, "meeting:\n  default-duration: 3h\n  default-open-early: 20m\n")
+	_, stderr, code := runMeet(t, dir, "create", "--config", cfg, "--room", "wk",
+		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	// 3h = 10800s, 20m = 1200s
+	if csv := readRoomsCSV(t, dir); !strings.Contains(csv, ",weekly,1,0,0,10800,1200,") {
+		t.Errorf("config defaults not applied; got:\n%s", csv)
+	}
+}
+
+// AC17.4 / RT-17.15, RT-17.16 — explicit flags override the config defaults.
+func TestCLI_Create_OverrideDefaults_RT17_15_RT17_16(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfigFile(t, dir, "meeting:\n  default-duration: 3h\n  default-open-early: 20m\n")
+	_, stderr, code := runMeet(t, dir, "create", "--config", cfg, "--room", "wk",
+		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z",
+		"--duration", "2h", "--open-early", "5m")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	// 2h = 7200s, 5m = 300s
+	if csv := readRoomsCSV(t, dir); !strings.Contains(csv, ",weekly,1,0,0,7200,300,") {
+		t.Errorf("explicit flags did not override config; got:\n%s", csv)
+	}
+}
