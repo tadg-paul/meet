@@ -318,24 +318,27 @@ func (s *Server) gateAllows(path string, r *http.Request) bool {
 	if path == "" {
 		return false
 	}
+	return s.roomActiveNow(path)
+}
+
+// roomActiveNow reports whether the room is currently joinable per the registry,
+// independent of any moderator JWT. An unwired registry (legacy / test setups)
+// means always active. Otherwise the latest row must be created and now must
+// fall in its window, or within a current recurrence occurrence (#17). Used by
+// both the guest gate and the moderator route (#14).
+func (s *Server) roomActiveNow(room string) bool {
 	if s.cfg.Rooms == nil {
-		// Registry not wired (legacy / test setups). Any non-empty room loads.
 		return true
 	}
-	entry := s.cfg.Rooms.LatestByRoom(path)
+	entry := s.cfg.Rooms.LatestByRoom(room)
 	if entry == nil || entry.Status != RoomCreated {
 		return false
 	}
 	now := s.now()
 	if entry.Recurrence != nil {
-		// Recurring definition (#17): active during a current occurrence,
-		// anchored at ValidFrom.
 		return entry.Recurrence.ActiveAt(entry.ValidFrom, now)
 	}
-	if now.Before(entry.ValidFrom) || now.After(entry.ValidUntil) {
-		return false
-	}
-	return true
+	return !now.Before(entry.ValidFrom) && !now.After(entry.ValidUntil)
 }
 
 // hasValidModeratorJWT returns true when the request carries a ?jwt= query

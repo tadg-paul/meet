@@ -640,20 +640,9 @@ func TestInactive_RootPath_RT13_13(t *testing.T) {
 	}
 }
 
-// AC13.2 / RT-13.7 — the moderator entry route keeps its page, no inactive copy.
-func TestInactive_ModeratorRouteUnaffected_RT13_7(t *testing.T) {
-	f := newGateFixture(t)
-	resp, body := f.doReq(t, "GET", "/workshop/moderator")
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("moderator route status=%d, want 200", resp.StatusCode)
-	}
-	if strings.Contains(body, inactiveParagraph) {
-		t.Error("moderator route contains inactive-room message")
-	}
-	if !strings.Contains(body, "Moderator access") {
-		t.Errorf("moderator route did not render the entry form; got %q", body[:min(200, len(body))])
-	}
-}
+// RT-13.7 removed: superseded by #14. The moderator route is now active-gated
+// (an inactive room returns the guest inactive 404), so the old "always shows
+// the form" assertion no longer holds. See moderator_gate_test.go (RT-14.1).
 
 // AC13.2 / RT-13.8 — a nested invalid room path keeps its response.
 func TestInactive_NestedInvalidPath_RT13_8(t *testing.T) {
@@ -679,24 +668,10 @@ func TestInactive_NestedModeratorLikePath_RT13_9(t *testing.T) {
 	}
 }
 
-// AC13.2 / RT-13.14 — the moderator entry route is invariant to registry state:
-// the same slug returns the same response whether or not it is registered/active.
-func TestInactive_ModeratorRouteRegistryInvariant_RT13_14(t *testing.T) {
-	f := newGateFixture(t)
-	before, beforeBody := f.doReq(t, "GET", "/wg/moderator")
-	f.registerRoom(t, "wg", f.now.Add(-time.Hour), f.now.Add(time.Hour))
-	after, afterBody := f.doReq(t, "GET", "/wg/moderator")
-
-	if before.StatusCode != after.StatusCode {
-		t.Errorf("moderator status changed with registry state: %d vs %d", before.StatusCode, after.StatusCode)
-	}
-	if headerFingerprint(before.Header) != headerFingerprint(after.Header) {
-		t.Error("moderator headers changed with registry state")
-	}
-	if beforeBody != afterBody {
-		t.Error("moderator page body changed with registry state")
-	}
-}
+// RT-13.14 removed: superseded by #14. The moderator route now varies with
+// registry state by design (active -> form, inactive -> the guest 404), which
+// leaks no more than the guest gate already does. See moderator_gate_test.go
+// (RT-14.4: unregistered and inactive-registered are indistinguishable).
 
 // AC13.3 / RT-13.10 — an active room still serves the meeting page.
 func TestInactive_ActiveRoomServesMeeting_RT13_10(t *testing.T) {

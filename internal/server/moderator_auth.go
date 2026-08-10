@@ -227,6 +227,13 @@ func (s *Server) handleModerator(w http.ResponseWriter, r *http.Request, room st
 		http.NotFound(w, r)
 		return
 	}
+	// #14: the moderator entry route is available only when the room is active
+	// now. For any not-active room it returns the same inactive-room 404 the
+	// guest gate serves, so it cannot be probed as a slug oracle.
+	if !s.roomActiveNow(room) {
+		s.renderInactiveRoom(w)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		s.renderModeratorForm(w, room)
@@ -251,7 +258,7 @@ func (s *Server) handleModeratorVerify(w http.ResponseWriter, r *http.Request, r
 		s.renderModeratorAuthPage(w, moderatorAuthPageData{
 			Title:   "Invalid link",
 			Heading: "Invalid link",
-			Message: "Invalid or expired moderator link.",
+			Message: "Invalid or expired login link.",
 		})
 		return
 	}
@@ -260,8 +267,8 @@ func (s *Server) handleModeratorVerify(w http.ResponseWriter, r *http.Request, r
 
 func (s *Server) renderModeratorForm(w http.ResponseWriter, room string) {
 	s.renderModeratorAuthPage(w, moderatorAuthPageData{
-		Title:    "Moderator access",
-		Heading:  "Moderator access",
+		Title:    "Login",
+		Heading:  "Login",
 		Message:  "Enter the preapproved email address for this room.",
 		Room:     room,
 		ShowForm: true,
@@ -272,7 +279,7 @@ func (s *Server) renderModeratorCheckEmail(w http.ResponseWriter) {
 	s.renderModeratorAuthPage(w, moderatorAuthPageData{
 		Title:   "Check your email",
 		Heading: "Check your email",
-		Message: "If that address is authorised, check your email for a moderator link.",
+		Message: "If that address is authorised, check your email for a login link.",
 	})
 }
 

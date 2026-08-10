@@ -124,8 +124,11 @@ flag set and examples.
 `meet token --room <name>` generates a JWT URL with moderator privileges and
 recording enabled. The JWT is passed to the 8x8 JaaS API client-side.
 
-`/<room>/moderator` lets a preapproved moderator request a room-scoped magic
-link. The email-to-room relationships and SMTP credentials live in
+`/<room>/moderator` presents a Login page where a preapproved moderator
+requests a room-scoped magic link. The page is available only while the room is
+active; outside an active window it returns the same inactive-room 404 a guest
+receives, so it cannot be probed to discover which room names exist. The
+email-to-room relationships and SMTP credentials live in
 `secrets/<host>.yaml.age`, loaded at runtime through `SECRETS_PATH`.
 
 ### Recording

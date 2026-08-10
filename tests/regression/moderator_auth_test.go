@@ -72,6 +72,13 @@ func newModeratorFixture(t *testing.T, configure func(*server.Config, *captureMo
 	logs := &bytes.Buffer{}
 	mailer := &captureModeratorMailer{}
 	f := &moderatorFixture{rooms: rooms, links: links, mailer: mailer, key: key, logs: logs, now: mustRFC3339(t, "2026-05-22T20:00:00Z")}
+	// #14: the moderator route is gated on the room being active now, so the
+	// rooms these tests exercise must be registered active around the clock.
+	for _, room := range []string{"allowed-room", "other-room", "workshop"} {
+		if err := server.CreateRoom(rooms, room, f.now.Add(-time.Hour), f.now.Add(time.Hour), "", f.now); err != nil {
+			t.Fatalf("register %s: %v", room, err)
+		}
+	}
 	cfg := server.Config{
 		BaseURL:      "https://meet.lobb.ie",
 		AppID:        "vpaas-magic-cookie-test",
@@ -289,7 +296,9 @@ func TestModeratorAuth_VerifyRedirectsWithRoomBoundJWT_RT12_10_RT12_11_RT12_12(t
 	if status != http.StatusOK || !bodyIsMeetingPage(body) {
 		t.Fatalf("authorised room status=%d meeting=%v", status, bodyIsMeetingPage(body))
 	}
-	status, _, _ = f.get(t, "/other-room?jwt="+jwtStr)
+	// Use an unregistered room so this asserts JWT room-binding, not the gate:
+	// other-room is registered active by the fixture for the #14 moderator route.
+	status, _, _ = f.get(t, "/unregistered-room?jwt="+jwtStr)
 	if status == http.StatusOK {
 		t.Errorf("room-bound jwt allowed a different room")
 	}
