@@ -151,7 +151,7 @@ func TestCLI_Create_StoredFormatRoundTrips_RT7_9(t *testing.T) {
 	// columns were appended by #17; one-off rows leave them empty.
 	wantHeader := "timestamp,room,status,valid_from,valid_until,note," +
 		"recur_kind,recur_interval,recur_ordinal,recur_weekday," +
-		"recur_duration_s,recur_lead_s,recur_ends\n"
+		"recur_duration_s,recur_lead_s,recur_ends,recur_tz\n"
 	if !strings.HasPrefix(csv, wantHeader) {
 		t.Errorf("rooms.csv header = %q, want %q", csv[:min(len(csv), 120)], wantHeader)
 	}

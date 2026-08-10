@@ -114,7 +114,9 @@ their window; a moderator JWT bypasses the window. Windows may be one-off
 (`--from` with `--duration`, or `--on` for a whole day) or recurring (`--repeat
 weekly|fortnightly|monthly`). Recurring rooms default to a 4-hour window opening
 15 minutes early (configurable via `meeting.default-duration` and
-`meeting.default-open-early`), all in UTC. See `meet create --help` for the full
+`meeting.default-open-early`), all in UTC by default. A recurring schedule may
+carry an IANA timezone (`--tz Europe/Dublin`), in which case occurrences keep
+their local wall-clock time across DST. See `meet create --help` for the full
 flag set and examples.
 
 ### Moderator access

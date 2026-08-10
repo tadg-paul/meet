@@ -572,6 +572,7 @@ func runCreate(args []string) {
 	durationFlag := fs.String("duration", "", "occurrence/window length, e.g. 4:30h")
 	openEarlyFlag := fs.String("open-early", "", "lead before start, e.g. 15m")
 	endsFlag := fs.String("ends", "", "series end date YYYY-MM-DD (for --repeat)")
+	tzFlag := fs.String("tz", "", "IANA timezone, e.g. Europe/Dublin, for --repeat (default UTC)")
 	fs.Parse(args)
 
 	if *roomFlag == "" {
@@ -607,7 +608,7 @@ func runCreate(args []string) {
 	if *repeatFlag != "" {
 		entry, err := buildRecurringEntry(recurringArgs{
 			repeat: *repeatFlag, from: *fromFlag, at: *atFlag, weekday: *weekdayFlag,
-			ordinal: *ordinalFlag, ends: *endsFlag, duration: duration, lead: lead,
+			ordinal: *ordinalFlag, ends: *endsFlag, tz: *tzFlag, duration: duration, lead: lead,
 			room: *roomFlag, note: *noteFlag, now: now,
 		})
 		if err != nil {
@@ -681,10 +682,10 @@ func resolveDuration(flagVal, cfgVal string, fallback time.Duration) (time.Durat
 }
 
 type recurringArgs struct {
-	repeat, from, at, weekday, ends, room, note string
-	ordinal                                     int
-	duration, lead                              time.Duration
-	now                                         time.Time
+	repeat, from, at, weekday, ends, tz, room, note string
+	ordinal                                         int
+	duration, lead                                  time.Duration
+	now                                             time.Time
 }
 
 func buildRecurringEntry(a recurringArgs) (server.RoomLogEntry, error) {
@@ -743,6 +744,13 @@ func buildRecurringEntry(a recurringArgs) (server.RoomLogEntry, error) {
 			return server.RoomLogEntry{}, fmt.Errorf("--ends: %w", err)
 		}
 		rec.Ends = d.Add(24*time.Hour - time.Second) // inclusive end of that day
+	}
+
+	if a.tz != "" {
+		if _, err := time.LoadLocation(a.tz); err != nil {
+			return server.RoomLogEntry{}, fmt.Errorf("--tz: unknown timezone %q", a.tz)
+		}
+		rec.Tz = a.tz
 	}
 
 	return server.RoomLogEntry{

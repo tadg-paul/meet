@@ -78,7 +78,7 @@ func roomsLogHeader() []string {
 	return []string{
 		"timestamp", "room", "status", "valid_from", "valid_until", "note",
 		"recur_kind", "recur_interval", "recur_ordinal", "recur_weekday",
-		"recur_duration_s", "recur_lead_s", "recur_ends",
+		"recur_duration_s", "recur_lead_s", "recur_ends", "recur_tz",
 	}
 }
 
@@ -199,6 +199,7 @@ func encodeEntry(e RoomLogEntry) []string {
 			strconv.Itoa(int(r.Duration/time.Second)),
 			strconv.Itoa(int(r.Lead/time.Second)),
 			formatOptional(r.Ends),
+			r.Tz,
 		)
 	}
 	return row
@@ -345,6 +346,10 @@ func decodeRecurrence(rec []string) *Recurrence {
 			ends = t
 		}
 	}
+	tz := ""
+	if len(rec) >= 14 {
+		tz = rec[13]
+	}
 	return &Recurrence{
 		Kind:          RecurKind(rec[6]),
 		IntervalWeeks: interval,
@@ -353,5 +358,6 @@ func decodeRecurrence(rec []string) *Recurrence {
 		Duration:      time.Duration(durationSecs) * time.Second,
 		Lead:          time.Duration(leadSecs) * time.Second,
 		Ends:          ends,
+		Tz:            tz,
 	}
 }
