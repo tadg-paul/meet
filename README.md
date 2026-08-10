@@ -86,6 +86,8 @@ The `--config` flag is still supported for explicit override. For local dev,
 | `base_url` | config | Public URL, used for banner and token URLs |
 | `default_room` | config | Room name when visiting `/` (default `lobby`) |
 | `default-moderator-name` | config | Display name for moderator tokens (default `Moderator`) |
+| `meeting.default-duration` | config | Default occurrence/window length for `meet create` (compound, e.g. `4h`, `4:30h`) |
+| `meeting.default-open-early` | config | Default lead before an occurrence opens (e.g. `15m`) |
 | `recording.webdav-path` | config | WebDAV destination folder for recordings |
 | `8x8-keys.app-id` | secrets | 8x8 JaaS application ID |
 | `8x8-keys.key-id` | secrets | 8x8 API key ID (used as JWT `kid` header) |
@@ -104,6 +106,16 @@ The `--config` flag is still supported for explicit override. For local dev,
 Each URL path creates a meeting room (`/workshop-april`, `/writing-group`).
 The banner displays the domain in Special Elite font with the subdomain
 highlighted. Root `/` serves the default room (configurable).
+
+### Meeting schedules
+
+Rooms are registered with `meet create` and are joinable by guests only during
+their window; a moderator JWT bypasses the window. Windows may be one-off
+(`--from` with `--duration`, or `--on` for a whole day) or recurring (`--repeat
+weekly|fortnightly|monthly`). Recurring rooms default to a 4-hour window opening
+15 minutes early (configurable via `meeting.default-duration` and
+`meeting.default-open-early`), all in UTC. See `meet create --help` for the full
+flag set and examples.
 
 ### Moderator access
 

@@ -1,19 +1,58 @@
-Usage: meet create --room <name> (--on <date> | --from <ts> --until <ts>) [--note ...]
+Usage:
+  meet create --room <name> --from <ts> --duration <dur> [--note ...]
+  meet create --room <name> --repeat weekly|fortnightly --from <ts> [options]
+  meet create --room <name> --repeat monthly --ordinal <n> --weekday <day> --at <HH:MM> [options]
 
-Register a meeting room. The URL becomes joinable from --from until --until
-for guests; moderator-JWT visits bypass the window.
+Register a meeting room. Guests may join only during the room's window, or, for
+a recurring room, during a current occurrence; moderator-JWT visits bypass the
+window. All times are UTC.
 
-Timestamps are RFC3339 (e.g. 2026-05-22T19:00:00Z) or dates
-(e.g. 2026-05-22, interpreted as 00:00:00Z).
+Durations use a compound format: a number, or an A:B pair, followed by a unit
+suffix h/hour, m/min, or s/sec, where a colon splits the value into that unit
+and the next-smaller one. Examples: 4h, 4:30h (4h30m), 90:00min (90m), 45s.
 
-Use --on YYYY-MM-DD for an all-day room from 00:00:00Z to 23:59:59Z.
+One-off rooms:
+  --from <ts> --duration <dur>   a window of <dur> starting at <ts>
+  --from <ts> --until <ts>       DEPRECATED: explicit end time (use --duration)
+  --on <date>                    an all-day window 00:00:00Z to 23:59:59Z
+
+Recurring rooms (--repeat), defaulting to a 4h window opening 15m early:
+  --repeat weekly|fortnightly    every 1 or 2 weeks from --from (the anchor)
+  --repeat monthly               the --ordinal-th --weekday of each month at --at
 
 Options:
-  --room <name>       Room name to register. Required.
-  --on <date>         Meeting date as YYYY-MM-DD; creates an all-day window
-                      from 00:00:00Z to 23:59:59Z.
-  --from <timestamp>  Valid-from time, as RFC3339 or YYYY-MM-DD.
-  --until <timestamp> Valid-until time, as RFC3339 or YYYY-MM-DD.
-  --note <text>       Free-form note stored with the registry event.
-  --config <paths>    Comma-separated config files. Defaults to auto-discovery
-                      from CONFIG_PATH, SECRETS_PATH, and local config files.
+  --room <name>        Room name to register. Required.
+  --on <date>          All-day one-off window (YYYY-MM-DD).
+  --from <ts>          One-off/weekly start or anchor (RFC3339 or YYYY-MM-DD);
+                       for monthly, the series start date.
+  --duration <dur>     Occurrence/window length. Defaults to the config value
+                       meeting.default-duration.
+  --open-early <dur>   How early the window opens before the start. Defaults to
+                       the config value meeting.default-open-early.
+  --repeat <kind>      weekly | fortnightly | monthly.
+  --weekday <day>      Weekday for --repeat monthly (e.g. wed).
+  --ordinal <n>        Which weekday of the month, 1..5, for --repeat monthly.
+  --at <HH:MM>         Time-of-day UTC for --repeat monthly.
+  --ends <date>        Series end date YYYY-MM-DD, inclusive; recurring only.
+  --until <ts>         DEPRECATED: one-off explicit end. Use --duration.
+  --note <text>        Free-form note stored with the registry event.
+  --config <paths>     Comma-separated config files. Defaults to auto-discovery
+                       from CONFIG_PATH, SECRETS_PATH, and local config files.
+
+Examples:
+  # Fortnightly from an anchor (config-default 4h window, opens 15m early)
+  meet create --room writers --from 2026-08-09T18:00:00Z --repeat fortnightly
+
+  # First Wednesday of every month at 18:00 UTC
+  meet create --room board --repeat monthly --ordinal 1 --weekday wed --at 18:00
+
+  # Second Tuesday monthly at 20:30 UTC, 90-minute window
+  meet create --room critique --repeat monthly --ordinal 2 --weekday tue \
+    --at 20:30 --duration 90:00min
+
+  # Weekly, 4.5h window, series ends at year's end
+  meet create --room workshop --from 2026-09-01T19:00:00Z --repeat weekly \
+    --duration 4:30h --ends 2026-12-31
+
+  # One-off using --duration (replaces the deprecated --until)
+  meet create --room demo --from 2026-08-20T14:00:00Z --duration 2h
