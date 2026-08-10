@@ -582,3 +582,22 @@ func TestCLI_Create_OverrideDefaults_RT17_15_RT17_16(t *testing.T) {
 		t.Errorf("explicit flags did not override config; got:\n%s", csv)
 	}
 }
+
+// AC18.2 / RT-18.10 — a monthly --at time is interpreted in the --tz zone, so
+// the stored anchor is the correct UTC instant (15:30 Detroit EDT == 19:30Z).
+func TestCLI_Create_MonthlyTzLocalTime_RT18_10(t *testing.T) {
+	dir := t.TempDir()
+	_, stderr, code := runMeet(t, dir, "create", "--room", "readers",
+		"--repeat", "monthly", "--ordinal", "2", "--weekday", "tue",
+		"--at", "15:30", "--tz", "America/Detroit", "--from", "2026-09-01")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	csv := readRoomsCSV(t, dir)
+	if !strings.Contains(csv, ",readers,created,2026-09-01T19:30:00Z,") {
+		t.Errorf("monthly --at not interpreted in the zone; want anchor 19:30Z, got:\n%s", csv)
+	}
+	if !strings.Contains(csv, "America/Detroit") {
+		t.Errorf("timezone not stored; got:\n%s", csv)
+	}
+}

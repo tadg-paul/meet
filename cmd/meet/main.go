@@ -690,6 +690,17 @@ type recurringArgs struct {
 
 func buildRecurringEntry(a recurringArgs) (server.RoomLogEntry, error) {
 	rec := server.Recurrence{Duration: a.duration, Lead: a.lead}
+
+	loc := time.UTC
+	if a.tz != "" {
+		l, err := time.LoadLocation(a.tz)
+		if err != nil {
+			return server.RoomLogEntry{}, fmt.Errorf("--tz: unknown timezone %q", a.tz)
+		}
+		loc = l
+		rec.Tz = a.tz
+	}
+
 	var anchor time.Time
 
 	switch strings.ToLower(a.repeat) {
@@ -730,7 +741,9 @@ func buildRecurringEntry(a recurringArgs) (server.RoomLogEntry, error) {
 			}
 			start = d.UTC()
 		}
-		anchor = time.Date(start.Year(), start.Month(), start.Day(), hh, mm, 0, 0, time.UTC)
+		// Build the anchor's time-of-day in the target zone so --at is the local
+		// wall-clock time (e.g. 15:30 America/Detroit), not 15:30 UTC (#18).
+		anchor = time.Date(start.Year(), start.Month(), start.Day(), hh, mm, 0, 0, loc)
 		rec.Kind = server.RecurMonthly
 		rec.Ordinal = a.ordinal
 		rec.Weekday = wd
@@ -744,13 +757,6 @@ func buildRecurringEntry(a recurringArgs) (server.RoomLogEntry, error) {
 			return server.RoomLogEntry{}, fmt.Errorf("--ends: %w", err)
 		}
 		rec.Ends = d.Add(24*time.Hour - time.Second) // inclusive end of that day
-	}
-
-	if a.tz != "" {
-		if _, err := time.LoadLocation(a.tz); err != nil {
-			return server.RoomLogEntry{}, fmt.Errorf("--tz: unknown timezone %q", a.tz)
-		}
-		rec.Tz = a.tz
 	}
 
 	return server.RoomLogEntry{

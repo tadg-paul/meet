@@ -32,7 +32,8 @@ Options:
   --repeat <kind>      weekly | fortnightly | monthly.
   --weekday <day>      Weekday for --repeat monthly (e.g. wed).
   --ordinal <n>        Which weekday of the month, 1..5, for --repeat monthly.
-  --at <HH:MM>         Time-of-day UTC for --repeat monthly.
+  --at <HH:MM>         Time-of-day for --repeat monthly, interpreted in --tz
+                       (or UTC when no --tz is given).
   --ends <date>        Series end date YYYY-MM-DD, inclusive; recurring only.
   --tz <zone>          IANA timezone (e.g. Europe/Dublin) for --repeat; the
                        occurrence keeps its local wall-clock across DST.
