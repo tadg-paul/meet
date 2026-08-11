@@ -3,7 +3,7 @@
 This is the canonical spec. ACs introduced from 2026-08-04 onward live here.
 Pre-cutover ACs remain in their originating issues until cited or migrated.
 
-Last migrated: AC15.16 from #15 on 2026-08-08
+Last migrated: AC14.2 from #14 on 2026-08-11
 
 ---
 
@@ -119,11 +119,12 @@ Last migrated: AC15.16 from #15 on 2026-08-08
 ### AC13.2 - Given a path that is not a single-segment meeting-room slug, inactive-room messaging is absent from route-specific non-room responses; in particular the `/<room>/moderator` entry response does not vary with the room's registry state, so it cannot be used as an oracle for slug validity.
 
 - Introduced: #13 (closed 2026-08-05)
+- Superseded by AC14.1 (#14, closed 2026-08-11): the `/<room>/moderator` entry response is now active-gated and does vary with registry state, returning the guest inactive-room 404 unless the room is active. The oracle-resistance goal is preserved by AC14.1 (blocked states are byte-identical to the guest 404); it is no longer achieved by serving the entry page unconditionally.
 - Tests:
-  - ✅ RT-13.7: `GET /room/moderator` keeps the moderator entry page and does not contain the inactive-room message.
+  - ~~🚫 RT-13.7: `GET /room/moderator` keeps the moderator entry page and does not contain the inactive-room message.~~ (removed: superseded by #14)
   - ✅ RT-13.8: `GET /bad/name` keeps the invalid-room response and does not contain the inactive-room message.
   - ✅ RT-13.9: `GET /bad/name/moderator` keeps non-moderator-route handling and does not contain the inactive-room message.
-  - ✅ RT-13.14: `GET /<active-room>/moderator` and `GET /<never-registered-room>/moderator` return the same moderator entry response, with no difference in status, headers, or body attributable to registry state.
+  - ~~🚫 RT-13.14: `GET /<active-room>/moderator` and `GET /<never-registered-room>/moderator` return the same moderator entry response, with no difference in status, headers, or body attributable to registry state.~~ (removed: superseded by #14)
 
 **Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
 
@@ -142,6 +143,31 @@ Last migrated: AC15.16 from #15 on 2026-08-08
 - Tests:
   - ✅ RT-13.15: The inactive-room response sets `Cache-Control: no-store`.
   - ✅ RT-13.16: The meeting-page response sets `Cache-Control: no-store`.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC14.1 - Given a request to `/<room>/moderator`, the moderator login form is available only when the room's latest registry row is `created` and the current time is within its window; for any not-active room (unknown, before-window, after-window, cancelled) the response is byte-identical to the guest inactive-room 404, disclosing no more about the slug than the plain room URL and never distinguishing a scheduled-but-not-open room from a never-registered name.
+
+- Introduced: #14 (closed 2026-08-11). Supersedes AC13.2.
+- Tests:
+  - ✅ RT-14.1: An active room's moderator path serves the login form.
+  - ✅ RT-14.2: An unknown slug's moderator path returns the inactive 404.
+  - ✅ RT-14.3: A before-window room's moderator path returns the inactive 404.
+  - ✅ RT-14.4: An after-window room's moderator path returns the inactive 404.
+  - ✅ RT-14.5: A cancelled room's moderator path returns the inactive 404.
+  - ✅ RT-14.6: The moderator-path responses for unknown, before-window, after-window, and cancelled rooms are byte-for-byte identical.
+  - ✅ RT-14.7: For the same not-active room, the moderator path and the plain room path return the byte-identical inactive page.
+  - ✅ RT-14.8: A form submission to a not-active room's moderator path delivers no magic link and returns the inactive 404.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC14.2 - Given the public moderator-auth pages, the entry page heading and title are "Login", and no public moderator-auth page copy contains the word "moderator".
+
+- Introduced: #14 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-14.9: The entry page heading and title are "Login" and the body contains neither "Moderator" nor "moderator".
+  - ✅ RT-14.10: The failed-verify page copy contains no "moderator".
+  - ✅ RT-14.11: The check-email page copy contains no "moderator".
 
 **Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
 
