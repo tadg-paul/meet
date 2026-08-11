@@ -1,51 +1,65 @@
 Usage:
-  meet create --room <name> --from <ts> --duration <dur> [--note ...]
-  meet create --room <name> --repeat weekly|fortnightly --from <ts> [options]
+  meet create --room <name> --from <date> --at <HH:MM> [--duration <dur>] [options]
+  meet create --room <name> --on <date> [--note ...]
+  meet create --room <name> --repeat weekly|fortnightly --weekday <day> --at <HH:MM> [options]
   meet create --room <name> --repeat monthly --ordinal <n> --weekday <day> --at <HH:MM> [options]
 
 Register a meeting room. Guests may join only during the room's window, or, for
 a recurring room, during a current occurrence; moderator-JWT visits bypass the
-window. All times are UTC.
+window.
+
+Dates are bare calendar dates (YYYY-MM-DD): --from, --on, and --ends never carry
+a time. The time-of-day comes from --at (HH:MM, minute granularity, no seconds),
+interpreted in --tz when given and otherwise in UTC. --at is required for every
+form except --on, which registers a whole day on its own.
 
 Durations use a compound format: a number, or an A:B pair, followed by a unit
 suffix h/hour, m/min, or s/sec, where a colon splits the value into that unit
 and the next-smaller one. Examples: 4h, 4:30h (4h30m), 90:00min (90m), 45s.
 
 One-off rooms:
-  --from <ts> --duration <dur>   a window of <dur> starting at <ts>
-  --from <ts> --until <ts>       DEPRECATED: explicit end time (use --duration)
-  --on <date>                    an all-day window 00:00:00Z to 23:59:59Z
+  --from <date> --at <HH:MM> [--duration <dur>]
+                                 a window of <dur> (config default 4h) starting
+                                 at that date and time
+  --on <date>                    an all-day window 00:00 to 23:59:59 UTC
 
 Recurring rooms (--repeat), defaulting to a 4h window opening 15m early:
-  --repeat weekly|fortnightly    every 1 or 2 weeks from --from (the anchor)
+  --repeat weekly|fortnightly    every 1 or 2 weeks on --weekday at --at; the
+                                 series starts on --from (default: today)
   --repeat monthly               the --ordinal-th --weekday of each month at --at
 
 Options:
   --room <name>        Room name to register. Required.
-  --on <date>          All-day one-off window (YYYY-MM-DD).
-  --from <ts>          One-off/weekly start or anchor (RFC3339 or YYYY-MM-DD);
-                       for monthly, the series start date.
+  --on <date>          All-day one-off window (YYYY-MM-DD). Stands alone.
+  --from <date>        Start date (one-off) or series-start date (recurring),
+                       YYYY-MM-DD. Recurring --from defaults to today. A value
+                       carrying a time is rejected; use --at for the time.
+  --at <HH:MM>         Time-of-day, interpreted in --tz (or UTC). Required for
+                       every form except --on.
   --duration <dur>     Occurrence/window length. Defaults to the config value
                        meeting.default-duration.
   --open-early <dur>   How early the window opens before the start. Defaults to
                        the config value meeting.default-open-early.
   --repeat <kind>      weekly | fortnightly | monthly.
-  --weekday <day>      Weekday for --repeat monthly (e.g. wed).
+  --weekday <day>      Weekday for --repeat (e.g. tue). Required for every
+                       --repeat kind, weekly included.
   --ordinal <n>        Which weekday of the month, 1..5, for --repeat monthly.
-  --at <HH:MM>         Time-of-day for --repeat monthly, interpreted in --tz
-                       (or UTC when no --tz is given).
   --ends <date>        Series end date YYYY-MM-DD, inclusive; recurring only.
-  --tz <zone>          IANA timezone (e.g. Europe/Dublin) for --repeat; the
-                       occurrence keeps its local wall-clock across DST.
-                       Defaults to UTC.
-  --until <ts>         DEPRECATED: one-off explicit end. Use --duration.
+  --tz <zone>          IANA timezone (e.g. Europe/Dublin) for --at; the window
+                       keeps its local wall-clock across DST. Defaults to UTC.
   --note <text>        Free-form note stored with the registry event.
   --config <paths>     Comma-separated config files. Defaults to auto-discovery
                        from CONFIG_PATH, SECRETS_PATH, and local config files.
 
 Examples:
-  # Fortnightly from an anchor (config-default 4h window, opens 15m early)
-  meet create --room writers --from 2026-08-09T18:00:00Z --repeat fortnightly
+  # One-off: 2h window on a given date at 14:00 UTC
+  meet create --room demo --from 2026-08-20 --at 14:00 --duration 2h
+
+  # All-day one-off
+  meet create --room open-day --on 2026-08-20
+
+  # Fortnightly on Tuesdays at 18:00 UTC (config-default 4h window, opens 15m early)
+  meet create --room writers --repeat fortnightly --weekday tue --at 18:00
 
   # First Wednesday of every month at 18:00 UTC
   meet create --room board --repeat monthly --ordinal 1 --weekday wed --at 18:00
@@ -54,13 +68,10 @@ Examples:
   meet create --room critique --repeat monthly --ordinal 2 --weekday tue \
     --at 20:30 --duration 90:00min
 
-  # Weekly, 4.5h window, series ends at year's end
-  meet create --room workshop --from 2026-09-01T19:00:00Z --repeat weekly \
+  # Weekly on Tuesdays, 4.5h window, series ends at year's end
+  meet create --room workshop --repeat weekly --weekday tue --at 19:00 \
     --duration 4:30h --ends 2026-12-31
 
-  # One-off using --duration (replaces the deprecated --until)
-  meet create --room demo --from 2026-08-20T14:00:00Z --duration 2h
-
   # Weekly at 19:00 Dublin local time, following DST automatically
-  meet create --room dublin-writers --from 2026-08-11T18:00:00Z \
-    --repeat weekly --tz Europe/Dublin
+  meet create --room dublin-writers --repeat weekly --weekday tue --at 19:00 \
+    --tz Europe/Dublin

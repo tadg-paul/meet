@@ -117,7 +117,7 @@ func TestTz_FallBackOverlap_RT18_7(t *testing.T) {
 func TestTz_CLIValidZone_RT18_8(t *testing.T) {
 	dir := t.TempDir()
 	_, stderr, code := runMeet(t, dir, "create", "--room", "z",
-		"--repeat", "weekly", "--from", "2026-08-11T18:00:00Z", "--tz", "Europe/Dublin")
+		"--repeat", "weekly", "--weekday", "tue", "--at", "18:00", "--tz", "Europe/Dublin")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
@@ -129,7 +129,7 @@ func TestTz_CLIValidZone_RT18_8(t *testing.T) {
 func TestTz_CLIUnknownZone_RT18_9(t *testing.T) {
 	dir := t.TempDir()
 	_, _, code := runMeet(t, dir, "create", "--room", "z",
-		"--repeat", "weekly", "--from", "2026-08-11T18:00:00Z", "--tz", "Nowhere/Nothing")
+		"--repeat", "weekly", "--weekday", "tue", "--at", "18:00", "--tz", "Nowhere/Nothing")
 	if code == 0 {
 		t.Error("unknown timezone should exit non-zero")
 	}

@@ -115,8 +115,7 @@ func TestCLI_Create_HappyPath_RT7_8(t *testing.T) {
 	stdout, stderr, code := runMeet(t, dir,
 		"create",
 		"--room", "readers-2026-05-25",
-		"--from", "2026-05-25T19:00:00Z",
-		"--until", "2026-05-25T21:00:00Z",
+		"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 		"--note", "book club",
 	)
 	if code != 0 {
@@ -140,8 +139,7 @@ func TestCLI_Create_StoredFormatRoundTrips_RT7_9(t *testing.T) {
 	_, _, code := runMeet(t, dir,
 		"create",
 		"--room", "foo",
-		"--from", "2026-05-25T19:00:00Z",
-		"--until", "2026-05-25T21:00:00Z",
+		"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 	)
 	if code != 0 {
 		t.Fatalf("create exit=%d", code)
@@ -167,8 +165,7 @@ func TestCLI_Create_DateOnlyFromUntil_RT10_6(t *testing.T) {
 	stdout, stderr, code := runMeet(t, dir,
 		"create",
 		"--room", "date-only",
-		"--from", "2026-06-09",
-		"--until", "2026-06-10",
+		"--from", "2026-06-09", "--at", "00:00", "--duration", "24h",
 	)
 	if code != 0 {
 		t.Fatalf("exit=%d, stderr=%q", code, stderr)
@@ -211,31 +208,30 @@ func TestCLI_Create_OnDateRejectsExplicitBounds_RT10_8(t *testing.T) {
 		"create",
 		"--room", "mixed",
 		"--on", "2026-06-09",
-		"--from", "2026-06-09T12:00:00Z",
-		"--until", "2026-06-09T13:00:00Z",
+		"--from", "2026-06-09",
 	)
 	if code == 0 {
-		t.Errorf("mixed --on/--from/--until: exit=0, want non-zero")
+		t.Errorf("mixed --on/--from: exit=0, want non-zero")
 	}
 	if !strings.Contains(stderr, "--on cannot be combined") {
 		t.Errorf("stderr does not explain the failure: %q", stderr)
 	}
 }
 
-// AC7.3 — `meet create` with --from later than --until exits non-zero and
-// writes no row.
+// AC7.3 — `meet create` rejects a --from that carries a time: it must be a
+// bare calendar date, and writes no row when malformed.
 func TestCLI_Create_InvalidWindowRejected_RT7_10(t *testing.T) {
 	dir := t.TempDir()
 	_, stderr, code := runMeet(t, dir,
 		"create",
 		"--room", "bad",
 		"--from", "2026-05-25T21:00:00Z",
-		"--until", "2026-05-25T19:00:00Z",
+		"--at", "19:00", "--duration", "2h",
 	)
 	if code == 0 {
-		t.Errorf("inverted window: exit=0, want non-zero")
+		t.Errorf("timestamped --from: exit=0, want non-zero")
 	}
-	if !strings.Contains(stderr, "must be before") {
+	if !strings.Contains(stderr, "bare date") {
 		t.Errorf("stderr does not explain the failure: %q", stderr)
 	}
 	csv := readRoomsCSV(t, dir)
@@ -249,8 +245,7 @@ func TestCLI_Create_MissingRoomRejected_RT7_11(t *testing.T) {
 	dir := t.TempDir()
 	_, _, code := runMeet(t, dir,
 		"create",
-		"--from", "2026-05-25T19:00:00Z",
-		"--until", "2026-05-25T21:00:00Z",
+		"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 	)
 	if code == 0 {
 		t.Errorf("missing --room: exit=0, want non-zero")
@@ -262,8 +257,7 @@ func TestCLI_Cancel_HappyPath_RT7_12(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "foo",
-		"--from", "2026-05-25T19:00:00Z",
-		"--until", "2026-05-25T21:00:00Z",
+		"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 	); code != 0 {
 		t.Fatalf("create exit=%d", code)
 	}
@@ -303,8 +297,7 @@ func TestCLI_List_All_RT7_15(t *testing.T) {
 	for _, name := range []string{"a", "b", "c"} {
 		if _, _, code := runMeet(t, dir,
 			"create", "--room", name,
-			"--from", "2026-05-25T19:00:00Z",
-			"--until", "2026-05-25T21:00:00Z",
+			"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 		); code != 0 {
 			t.Fatalf("create %s exit=%d", name, code)
 		}
@@ -325,15 +318,13 @@ func TestCLI_List_FilterCancelled_RT7_16(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "active-one",
-		"--from", "2026-05-25T19:00:00Z",
-		"--until", "2026-05-25T21:00:00Z",
+		"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 	); code != 0 {
 		t.Fatalf("create exit=%d", code)
 	}
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "cancelled-one",
-		"--from", "2026-05-25T19:00:00Z",
-		"--until", "2026-05-25T21:00:00Z",
+		"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 	); code != 0 {
 		t.Fatalf("create exit=%d", code)
 	}
@@ -360,16 +351,14 @@ func TestCLI_List_FilterActive_RT7_17(t *testing.T) {
 	// "active" — created with a window spanning the current real time
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "active-one",
-		"--from", "2000-01-01T00:00:00Z",
-		"--until", "2099-12-31T23:59:59Z",
+		"--from", "2000-01-01", "--at", "00:00", "--duration", "900000h",
 	); code != 0 {
 		t.Fatalf("create active exit=%d", code)
 	}
 	// "upcoming" — created but in the far future
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "upcoming-one",
-		"--from", "2099-01-01T00:00:00Z",
-		"--until", "2099-12-31T23:59:59Z",
+		"--from", "2099-01-01", "--at", "00:00", "--duration", "8760h",
 	); code != 0 {
 		t.Fatalf("create upcoming exit=%d", code)
 	}
@@ -391,15 +380,13 @@ func TestCLI_List_FilterPast_RT7_18(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "past-one",
-		"--from", "2000-01-01T00:00:00Z",
-		"--until", "2000-01-02T00:00:00Z",
+		"--from", "2000-01-01", "--at", "00:00", "--duration", "24h",
 	); code != 0 {
 		t.Fatalf("create past exit=%d", code)
 	}
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "active-one",
-		"--from", "2000-01-01T00:00:00Z",
-		"--until", "2099-12-31T23:59:59Z",
+		"--from", "2000-01-01", "--at", "00:00", "--duration", "900000h",
 	); code != 0 {
 		t.Fatalf("create active exit=%d", code)
 	}
@@ -421,8 +408,7 @@ func TestCLI_Persistence_RegisteredSurvivesAcrossExec_RT7_23(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "persist-me",
-		"--from", "2026-05-25T19:00:00Z",
-		"--until", "2026-05-25T21:00:00Z",
+		"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 		"--note", "survives restart",
 	); code != 0 {
 		t.Fatalf("create exit=%d", code)
@@ -445,8 +431,7 @@ func TestCLI_Persistence_CancellationSurvivesAcrossExec_RT7_24(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, code := runMeet(t, dir,
 		"create", "--room", "foo",
-		"--from", "2026-05-25T19:00:00Z",
-		"--until", "2026-05-25T21:00:00Z",
+		"--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 	); code != 0 {
 		t.Fatalf("create exit=%d", code)
 	}
@@ -477,7 +462,7 @@ func writeConfigFile(t *testing.T, dir, content string) string {
 func TestCLI_Create_Weekly_RT17_26(t *testing.T) {
 	dir := t.TempDir()
 	_, stderr, code := runMeet(t, dir, "create", "--room", "wk",
-		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z")
+		"--repeat", "weekly", "--weekday", "tue", "--at", "19:00", "--from", "2026-08-11")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
@@ -529,7 +514,7 @@ func TestCLI_Create_BadOrdinal_RT17_29(t *testing.T) {
 func TestCLI_Create_Ends_RT17_32(t *testing.T) {
 	dir := t.TempDir()
 	_, stderr, code := runMeet(t, dir, "create", "--room", "wk",
-		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z", "--ends", "2026-12-31")
+		"--repeat", "weekly", "--weekday", "tue", "--at", "19:00", "--ends", "2026-12-31")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
@@ -538,16 +523,21 @@ func TestCLI_Create_Ends_RT17_32(t *testing.T) {
 	}
 }
 
-// AC17.8 / RT-17.33 — the deprecated --until still records a one-off window.
+// AC17.8 / RT-17.33 — --until is refused outright (superseded by --duration);
+// the create is rejected and writes no row.
 func TestCLI_Create_DeprecatedUntil_RT17_33(t *testing.T) {
 	dir := t.TempDir()
 	_, stderr, code := runMeet(t, dir, "create", "--room", "one",
-		"--from", "2026-08-11T19:00:00Z", "--until", "2026-08-11T21:00:00Z")
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, stderr)
+		"--from", "2026-08-11", "--at", "19:00", "--duration", "2h",
+		"--until", "2026-08-11T21:00:00Z")
+	if code == 0 {
+		t.Fatalf("--until should be rejected, got exit=0")
 	}
-	if csv := readRoomsCSV(t, dir); !strings.Contains(csv, "one,created,2026-08-11T19:00:00Z,2026-08-11T21:00:00Z,") {
-		t.Errorf("rooms.csv missing one-off row from --until; got:\n%s", csv)
+	if !strings.Contains(stderr, "--until is no longer supported") {
+		t.Errorf("stderr does not explain the rejection; got: %q", stderr)
+	}
+	if strings.Contains(readRoomsCSV(t, dir), "one,created") {
+		t.Errorf("rejected create should write no row")
 	}
 }
 
@@ -557,7 +547,7 @@ func TestCLI_Create_ConfigDefaults_RT17_13_RT17_14(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfigFile(t, dir, "meeting:\n  default-duration: 3h\n  default-open-early: 20m\n")
 	_, stderr, code := runMeet(t, dir, "create", "--config", cfg, "--room", "wk",
-		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z")
+		"--repeat", "weekly", "--weekday", "tue", "--at", "19:00")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
@@ -572,7 +562,7 @@ func TestCLI_Create_OverrideDefaults_RT17_15_RT17_16(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeConfigFile(t, dir, "meeting:\n  default-duration: 3h\n  default-open-early: 20m\n")
 	_, stderr, code := runMeet(t, dir, "create", "--config", cfg, "--room", "wk",
-		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z",
+		"--repeat", "weekly", "--weekday", "tue", "--at", "19:00",
 		"--duration", "2h", "--open-early", "5m")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
@@ -607,7 +597,7 @@ func TestCLI_Create_MonthlyTzLocalTime_RT18_10(t *testing.T) {
 func TestCLI_Create_PreviewMore_RT19_5(t *testing.T) {
 	dir := t.TempDir()
 	stdout, stderr, code := runMeet(t, dir, "create", "--room", "wk",
-		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z")
+		"--repeat", "weekly", "--weekday", "tue", "--at", "19:00", "--from", "2026-08-11")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
@@ -624,7 +614,8 @@ func TestCLI_Create_PreviewMore_RT19_5(t *testing.T) {
 func TestCLI_Create_PreviewBounded_RT19_6(t *testing.T) {
 	dir := t.TempDir()
 	stdout, stderr, code := runMeet(t, dir, "create", "--room", "wk",
-		"--repeat", "weekly", "--from", "2026-09-01T19:00:00Z", "--ends", "2026-09-20")
+		"--repeat", "weekly", "--weekday", "tue", "--at", "19:00",
+		"--from", "2026-09-01", "--ends", "2026-09-20")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
@@ -640,7 +631,7 @@ func TestCLI_Create_PreviewBounded_RT19_6(t *testing.T) {
 func TestCLI_List_RoomOccurrences_RT19_7(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, code := runMeet(t, dir, "create", "--room", "wk",
-		"--repeat", "weekly", "--from", "2026-08-11T19:00:00Z"); code != 0 {
+		"--repeat", "weekly", "--weekday", "tue", "--at", "19:00"); code != 0 {
 		t.Fatalf("create exit=%d", code)
 	}
 	stdout, _, code := runMeet(t, dir, "list", "--room", "wk")
@@ -656,11 +647,11 @@ func TestCLI_List_RoomOccurrences_RT19_7(t *testing.T) {
 func TestCLI_List_DefaultExcludesPast_RT19_8(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, code := runMeet(t, dir, "create", "--room", "gone",
-		"--from", "2020-01-01T00:00:00Z", "--until", "2020-01-02T00:00:00Z"); code != 0 {
+		"--from", "2020-01-01", "--at", "00:00", "--duration", "24h"); code != 0 {
 		t.Fatalf("create gone exit=%d", code)
 	}
 	if _, _, code := runMeet(t, dir, "create", "--room", "future",
-		"--repeat", "weekly", "--from", "2099-01-06T19:00:00Z"); code != 0 {
+		"--repeat", "weekly", "--weekday", "tue", "--at", "19:00", "--from", "2099-01-06"); code != 0 {
 		t.Fatalf("create future exit=%d", code)
 	}
 	stdout, _, code := runMeet(t, dir, "list")

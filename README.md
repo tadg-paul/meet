@@ -47,7 +47,7 @@ meet-helper light-hugger token --room workshop-april
 meet-helper light-hugger moderator-link --room workshop-april \
   --email moderator@example.com --send
 meet-helper light-hugger create --room demo \
-  --from 2026-05-25T19:00:00Z --until 2026-05-25T21:00:00Z
+  --from 2026-05-25 --at 19:00 --duration 2h
 meet-helper light-hugger list --filter active
 meet-helper light-hugger cancel --room demo
 ```
@@ -110,16 +110,19 @@ highlighted. Root `/` serves the default room (configurable).
 ### Meeting schedules
 
 Rooms are registered with `meet create` and are joinable by guests only during
-their window; a moderator JWT bypasses the window. Windows may be one-off
-(`--from` with `--duration`, or `--on` for a whole day) or recurring (`--repeat
-weekly|fortnightly|monthly`). Recurring rooms default to a 4-hour window opening
-15 minutes early (configurable via `meeting.default-duration` and
-`meeting.default-open-early`), all in UTC by default. A recurring schedule may
-carry an IANA timezone (`--tz Europe/Dublin`), in which case occurrences keep
-their local wall-clock time across DST. Creating a recurring room previews its
-next occurrences, and `meet list --room <name>` lists a room's upcoming
-occurrences; `meet list` on its own shows current and future rooms. See `meet
-create --help` and `meet list --help` for the full flag set and examples.
+their window; a moderator JWT bypasses the window. Dates (`--from`, `--on`,
+`--ends`) are bare calendar dates; the time-of-day comes from `--at HH:MM`,
+required for every form except the all-day `--on`. Windows may be one-off (a
+`--from` date and `--at` time with `--duration`, or `--on` for a whole day) or
+recurring (`--repeat weekly|fortnightly|monthly` on a `--weekday` at `--at`).
+Recurring rooms default to a 4-hour window opening 15 minutes early
+(configurable via `meeting.default-duration` and `meeting.default-open-early`).
+`--at` is interpreted in UTC by default, or in the IANA zone given by `--tz`
+(`--tz Europe/Dublin`), in which case occurrences keep their local wall-clock
+time across DST. Creating a recurring room previews its next occurrences, and
+`meet list --room <name>` lists a room's upcoming occurrences; `meet list` on
+its own shows current and future rooms. See `meet create --help` and `meet list
+--help` for the full flag set and examples.
 
 ### Moderator access
 

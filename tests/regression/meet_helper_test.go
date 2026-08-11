@@ -137,11 +137,11 @@ func TestHelper_TokenSubcommand_RT10_1(t *testing.T) {
 // AC10.2 — create subcommand with multiple args is forwarded in order.
 func TestHelper_CreateSubcommand_RT10_3(t *testing.T) {
 	argv := sshshim.BuildSSHArgv("skys-edge", "create", []string{
-		"--room", "demo", "--from", "2026-05-25T19:00:00Z", "--until", "2026-05-25T21:00:00Z",
+		"--room", "demo", "--from", "2026-05-25", "--at", "19:00", "--duration", "2h",
 	})
 	cmd := argv[1]
 	// Confirm exact in-order appearance.
-	expected := []string{"'create'", "'--room'", "'demo'", "'--from'", "'2026-05-25T19:00:00Z'", "'--until'", "'2026-05-25T21:00:00Z'"}
+	expected := []string{"'create'", "'--room'", "'demo'", "'--from'", "'2026-05-25'", "'--at'", "'19:00'", "'--duration'", "'2h'"}
 	pos := 0
 	for _, e := range expected {
 		i := strings.Index(cmd[pos:], e)
