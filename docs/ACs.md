@@ -3,7 +3,7 @@
 This is the canonical spec. ACs introduced from 2026-08-04 onward live here.
 Pre-cutover ACs remain in their originating issues until cited or migrated.
 
-Last migrated: AC14.2 from #14 on 2026-08-11
+Last migrated: AC18.5 from #18 on 2026-08-11
 
 ---
 
@@ -336,5 +336,172 @@ UT-15.1 through UT-15.14 were confirmed passing by the operator on 2026-08-08.
   - ✅ RT-15.34: A later configuration set supersedes an earlier one across a reconstruction (last-row-wins).
   - ✅ RT-15.35: A room with no configuration set has the system defaults after a reconstruction.
   - ✅ RT-15.36: After a reconstruction, a room that had a running timer has no active timer but retains its configuration.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+---
+
+## Recurring Schedules
+
+### AC17.1 - The room registry stores recurring meeting definitions (weekly, every-N-weeks, monthly Nth-weekday), and the latest row for a room remains its authoritative definition under last-row-wins, whether that row is a one-off window, a recurring definition, or a cancellation.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.1: A stored weekly definition is read back as the room's current definition.
+  - ✅ RT-17.2: A stored monthly Nth-weekday definition is read back as the room's current definition.
+  - ✅ RT-17.3: A later definition for the same room supersedes an earlier one.
+  - ✅ RT-17.4: A cancellation supersedes a recurring definition.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.2 - Given a weekly or every-N-weeks recurring room, guest access is open during each occurrence's active window and closed between occurrences, with every-N-weeks leaving the intervening weeks closed.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.5: A guest loads the meeting page during the first occurrence's window.
+  - ✅ RT-17.6: A guest receives the inactive page between the first and next occurrence.
+  - ✅ RT-17.7: A guest loads the meeting page during a later weekly occurrence.
+  - ✅ RT-17.8: For a fortnightly room, a guest receives the inactive page during the skipped week and the meeting page on the following occurrence.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.3 - Given a monthly Nth-weekday recurring room, guest access is open during that occurrence each month, and a month with no Nth instance of the weekday has no occurrence.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.9: A "first Wednesday, 18:00 UTC" room opens to a guest during the first Wednesday's window.
+  - ✅ RT-17.10: A "second Tuesday, 20:30 UTC" room opens to a guest during the second Tuesday's window.
+  - ✅ RT-17.11: A month whose Nth weekday is absent yields no occurrence and the guest receives the inactive page.
+  - ✅ RT-17.12: Occurrences in adjacent months are computed independently at the correct dates.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.4 - When a room does not specify occurrence duration or early-open lead, the create subcommand resolves them from the application config YAML defaults and records them on the row; explicit `--duration`/`--open-early` values override the config defaults.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.13: A create without `--duration` records the config-default duration on the row.
+  - ✅ RT-17.14: A create without `--open-early` records the config-default lead on the row.
+  - ✅ RT-17.15: An explicit `--duration` overrides the config default on the recorded row.
+  - ✅ RT-17.16: An explicit `--open-early` overrides the config default on the recorded row.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.5 - An occurrence's active window opens exactly the lead before its start and closes exactly at start-plus-duration, with inclusive boundaries.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.17: At exactly start-minus-lead, a guest loads the meeting page.
+  - ✅ RT-17.18: One second before start-minus-lead, a guest receives the inactive page.
+  - ✅ RT-17.19: At exactly start-plus-duration, a guest loads the meeting page.
+  - ✅ RT-17.20: One second after start-plus-duration, a guest receives the inactive page.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.6 - A recurring definition with a series end (`--ends`) has no occurrences after that date; without one the series continues indefinitely.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.21: An occurrence before the series end opens to a guest.
+  - ✅ RT-17.22: A would-be occurrence after the series end gives the guest the inactive page.
+  - ✅ RT-17.23: With no series end, an occurrence far in the future still opens to a guest.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.7 - A cancellation of a recurring room closes guest access during would-be occurrences, and a subsequent recurring definition re-opens it.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.24: After cancelling a recurring room, a guest receives the inactive page during what would have been an active occurrence.
+  - ✅ RT-17.25: A recurring definition created after a cancellation re-opens guest access during an occurrence.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.8 - The create subcommand records a recurring room from recurrence, `--duration`, `--open-early`, and `--ends` flags, rejecting invalid definitions (unknown weekday, out-of-range ordinal, unparseable duration, missing required fields) and writing no row on rejection; the deprecated `--until` remains accepted for one-off rooms.
+
+- Introduced: #17 (closed 2026-08-11)
+- Note: the closing clause "the deprecated `--until` remains accepted for one-off rooms" was superseded by #20 (closed 2026-08-11); `--until` is now rejected outright and one-off length comes from `--duration`. RT-17.33 was repurposed accordingly.
+- Tests:
+  - ✅ RT-17.26: A create with a weekly recurrence writes a recurring row.
+  - ✅ RT-17.27: A create with a monthly Nth-weekday recurrence writes a recurring row.
+  - ✅ RT-17.28: A create with an unknown weekday exits non-zero and writes no row.
+  - ✅ RT-17.29: A create with an out-of-range ordinal exits non-zero and writes no row.
+  - ✅ RT-17.32: A create with `--ends` records the series end on the row.
+  - ✅ RT-17.33: A create passing the removed `--until` flag is rejected and writes no row. (Repurposed by #20; originally asserted a one-off `--until` recorded the correct window.)
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.9 - One-off room windows continue to admit a guest only within their configured window.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.30: A one-off room opens to a guest within its window.
+  - ✅ RT-17.31: A one-off room gives the guest the inactive page outside its window.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.10 - The end-to-end schedule works against the live deployment: an operator-defined recurring room admits a participant during a scheduled occurrence and refuses outside it.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ UT-17.1: The operator runs `create` with a recurrence on the deployed host; a second device reaches the meeting during a current occurrence and the inactive page outside it. (Operator-confirmed PASS 2026-08-11.)
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC17.11 - A duration value is a number, or a colon-split pair, followed by a unit suffix (`h`/`hour`, `m`/`min`, `s`/`sec`), where the colon splits the value into that unit and the next-smaller one; malformed, unit-less, or non-positive values are rejected.
+
+- Introduced: #17 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-17.34: `4:30h` parses to four hours thirty minutes.
+  - ✅ RT-17.35: `90:00 min` parses to ninety minutes.
+  - ✅ RT-17.36: `4h`, `30m`, and `45s`, and their `hour`/`min`/`sec` synonyms, parse to the plain unit values.
+  - ✅ RT-17.37: A value with no unit, a non-numeric value, or a non-positive value is rejected.
+  - ✅ RT-17.38: A colon minor field of sixty or more is rejected.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC18.1 - A recurring definition may carry an IANA timezone; its occurrence start times are computed in that zone and compared against the current instant in UTC, and a definition with no timezone is computed in UTC as in #17.
+
+- Introduced: #18 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-18.1: A definition with a timezone is stored and read back carrying that zone.
+  - ✅ RT-18.2: A guest loads the meeting page during an occurrence whose in-zone start maps to the current UTC instant.
+  - ✅ RT-18.3: A definition with no timezone admits a guest at the same instants as the equivalent UTC definition.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC18.2 - Occurrences observe daylight saving: a fixed local time-of-day maps to different UTC instants on either side of a DST transition for the definition's zone, and the guest window tracks the shift.
+
+- Introduced: #18 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-18.4: For a zoned fixed-local-time definition, an occurrence in standard time and one in daylight time have UTC starts that differ by the zone's offset change.
+  - ✅ RT-18.5: A guest is admitted at the correct UTC instant for a post-transition occurrence, not at the pre-transition UTC instant.
+  - ✅ RT-18.10: A monthly `--at` time is interpreted in the `--tz` zone, so the stored anchor is the correct UTC instant (15:30 America/Detroit EDT is 19:30Z). (Added as a regression during #18.)
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC18.3 - Daylight-saving boundary edge cases resolve deterministically: a local time that does not occur on the spring-forward day, and one that occurs twice on the fall-back day, each yield a single defined occurrence rather than an error.
+
+- Introduced: #18 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-18.6: A definition whose local time falls in the spring-forward gap yields a defined occurrence rather than an error.
+  - ✅ RT-18.7: A definition whose local time falls in the fall-back overlap yields a single defined occurrence.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC18.4 - The create subcommand accepts and validates a timezone, rejecting an unknown zone name and writing no row.
+
+- Introduced: #18 (closed 2026-08-11)
+- Tests:
+  - ✅ RT-18.8: A create with a valid IANA zone writes a row carrying that zone.
+  - ✅ RT-18.9: A create with an unknown zone name exits non-zero and writes no row.
+
+**Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
+
+### AC18.5 - The end-to-end zoned schedule works against the live deployment: a zoned recurring meeting opens at the correct local wall-clock time.
+
+- Introduced: #18 (closed 2026-08-11)
+- Tests:
+  - ✅ UT-18.1: The operator schedules a zoned recurring room on the deployed host; a second device reaches the meeting at the correct local time during a current occurrence and the inactive page outside it. (Operator-confirmed PASS 2026-08-11.)
 
 **Key:** ✅ passing · ⏳ pending · ❌ failing · ~~🚫 removed~~
