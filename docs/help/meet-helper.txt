@@ -21,7 +21,7 @@ Examples:
     --email moderator@example.com --send
   meet-helper skys-edge create --room demo --on 2026-06-09
   meet-helper skys-edge create --room demo \
-    --from 2026-06-09T18:00:00Z --until 2026-06-09T20:00:00Z
+    --from 2026-06-09 --at 18:00 --duration 2h
   meet-helper skys-edge list --filter active
   meet-helper skys-edge cancel --room demo
 
