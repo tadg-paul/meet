@@ -26,6 +26,10 @@ window.initTimer = (api, jwt) => {
         graceEnd: new Audio('/static/sounds/grace-end-period.mp3'),
     };
 
+    // Cues play at a reduced volume so they carry without being harsh (#21).
+    const CUE_VOLUME = 0.66;
+    Object.values(sounds).forEach((audio) => { audio.volume = CUE_VOLUME; });
+
     // Arm audio on the first available user gesture / join so a later cue is not
     // blocked by the browser autoplay policy.
     let armed = false;
