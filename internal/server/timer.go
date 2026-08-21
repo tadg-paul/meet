@@ -34,6 +34,11 @@ type StateView struct {
 	Paused    bool        `json:"paused"`
 	Extended  bool        `json:"extended"`
 	Config    StateConfig `json:"config"`
+	// Cue, when non-empty, instructs clients to play a time-based cue
+	// ("warning", "end", "grace-end") once. CueID is stable per run and cue so
+	// a client plays each at most once across reconnects (#21).
+	Cue   string `json:"cue,omitempty"`
+	CueID string `json:"cueId,omitempty"`
 }
 
 // StateConfig is the configuration portion of StateView, including the derived
@@ -54,7 +59,23 @@ type roomTimer struct {
 	runningSince time.Time     // start of the current run segment (valid when running)
 	running      bool
 	extended     bool
+	// emitted records which time-based cues have already been broadcast this
+	// run, so each fires exactly once (#21). Reset when a new run starts.
+	emitted map[string]bool
 }
+
+func (rt *roomTimer) warnAt() int  { return rt.cfg.Total - rt.cfg.WarnSeconds() }
+func (rt *roomTimer) endAt() int   { return rt.cfg.Total }
+func (rt *roomTimer) graceAt() int { return rt.cfg.Total + rt.cfg.GraceSeconds() }
+
+// Cadence for the background ticker (#21): it wakes every tickInterval to emit
+// due cues and, every heartbeatInterval of server time, re-anchors subscribers
+// with the current state so a stale, reconnected, or suspended client cannot
+// drift. The ticker runs only while at least one subscriber is connected.
+const (
+	tickInterval      = 250 * time.Millisecond
+	heartbeatInterval = 10 * time.Second
+)
 
 // TimerHub holds every room's timer and fans state changes out to subscribers.
 type TimerHub struct {
@@ -64,6 +85,9 @@ type TimerHub struct {
 	rooms    map[string]*roomTimer
 	subs     map[string]map[chan StateView]struct{}
 	logger   *slog.Logger
+	subCount int           // total subscribers across all rooms
+	stop     chan struct{} // non-nil while the ticker goroutine runs
+	lastBeat time.Time     // server time of the last heartbeat
 }
 
 // NewTimerHub builds a hub. settings may be nil (configuration then falls back
@@ -115,6 +139,7 @@ func (h *TimerHub) Apply(room, action string, cfg *TimerConfig) (StateView, erro
 			cfg:          h.configFor(room),
 			runningSince: h.now(),
 			running:      true,
+			emitted:      map[string]bool{},
 		}
 	case "pause":
 		if rt := h.rooms[room]; rt != nil && rt.running {
@@ -164,11 +189,7 @@ func (h *TimerHub) stateForLocked(room string) StateView {
 		return stoppedView(h.configFor(room))
 	}
 
-	elapsed := rt.elapsedBase
-	if rt.running {
-		elapsed += h.now().Sub(rt.runningSince)
-	}
-	e := int(elapsed / time.Second)
+	e := h.elapsedSecondsLocked(rt)
 
 	total := rt.cfg.Total
 	warnAt := total - rt.cfg.WarnSeconds()
@@ -205,6 +226,16 @@ func (h *TimerHub) stateForLocked(room string) StateView {
 	return view
 }
 
+// elapsedSecondsLocked returns the whole seconds of run time for rt. Caller
+// holds mu.
+func (h *TimerHub) elapsedSecondsLocked(rt *roomTimer) int {
+	elapsed := rt.elapsedBase
+	if rt.running {
+		elapsed += h.now().Sub(rt.runningSince)
+	}
+	return int(elapsed / time.Second)
+}
+
 func stoppedView(cfg TimerConfig) StateView {
 	return StateView{Phase: PhaseStopped, Config: configView(cfg)}
 }
@@ -228,7 +259,17 @@ func (h *TimerHub) Subscribe(room string) chan StateView {
 	if h.subs[room] == nil {
 		h.subs[room] = make(map[chan StateView]struct{})
 	}
+	// When a room gains its first subscriber, seed its cue highwater from the
+	// current elapsed so boundaries already in the past are not replayed to a
+	// late joiner (they, like everyone, hear only future cues).
+	if len(h.subs[room]) == 0 {
+		h.seedEmittedLocked(room)
+	}
 	h.subs[room][ch] = struct{}{}
+	h.subCount++
+	if h.subCount == 1 {
+		h.startTickerLocked()
+	}
 	current := h.stateForLocked(room)
 	h.mu.Unlock()
 
@@ -243,12 +284,128 @@ func (h *TimerHub) Unsubscribe(room string, ch chan StateView) {
 		if _, ok := subs[ch]; ok {
 			delete(subs, ch)
 			close(ch)
+			h.subCount--
+			if h.subCount == 0 {
+				h.stopTickerLocked()
+			}
 		}
 		if len(subs) == 0 {
 			delete(h.subs, room)
 		}
 	}
 	h.mu.Unlock()
+}
+
+// startTickerLocked launches the background ticker. Caller holds mu.
+func (h *TimerHub) startTickerLocked() {
+	h.stop = make(chan struct{})
+	h.lastBeat = h.now()
+	stop := h.stop
+	go h.runTicker(stop)
+}
+
+// stopTickerLocked signals the background ticker to exit. Caller holds mu.
+func (h *TimerHub) stopTickerLocked() {
+	if h.stop != nil {
+		close(h.stop)
+		h.stop = nil
+	}
+}
+
+func (h *TimerHub) runTicker(stop chan struct{}) {
+	t := time.NewTicker(tickInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			h.tick()
+		}
+	}
+}
+
+// tick emits any newly-due cues and, on the heartbeat cadence, re-anchors every
+// subscribed room. Views are gathered under the lock and sent after releasing
+// it, as elsewhere in the hub.
+func (h *TimerHub) tick() {
+	now := h.now()
+	// Broadcasts happen under the lock: the sends are non-blocking (see
+	// broadcast), and holding the lock keeps a concurrent Unsubscribe from
+	// closing a channel mid-send.
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	beat := now.Sub(h.lastBeat) >= heartbeatInterval
+	if beat {
+		h.lastBeat = now
+	}
+	for room := range h.subs {
+		targets := h.subscribersLocked(room)
+		if len(targets) == 0 {
+			continue
+		}
+		view := h.stateForLocked(room)
+		rt := h.rooms[room]
+		if rt == nil { // stopped or auto-reset: nothing to cue
+			if beat {
+				broadcast(targets, view)
+			}
+			continue
+		}
+		emitted := false
+		for _, cue := range h.newlyDueCuesLocked(rt, view.Elapsed) {
+			rt.emitted[cue] = true
+			v := view
+			v.Cue = cue
+			v.CueID = cueID(rt, cue)
+			broadcast(targets, v)
+			emitted = true
+		}
+		if beat && !emitted {
+			broadcast(targets, view)
+		}
+	}
+}
+
+// newlyDueCuesLocked returns the time-based cues whose boundary elapsed has
+// reached and which have not yet been emitted this run. Caller holds mu.
+func (h *TimerHub) newlyDueCuesLocked(rt *roomTimer, e int) []string {
+	var due []string
+	if rt.cfg.WarnSeconds() > 0 && e >= rt.warnAt() && !rt.emitted["warning"] {
+		due = append(due, "warning")
+	}
+	if e >= rt.endAt() && !rt.emitted["end"] {
+		due = append(due, "end")
+	}
+	if !rt.extended && e >= rt.graceAt() && !rt.emitted["grace-end"] {
+		due = append(due, "grace-end")
+	}
+	return due
+}
+
+// seedEmittedLocked marks as emitted every cue whose boundary is already in the
+// past, so a first subscriber joining mid-run is not sent a stale cue. Caller
+// holds mu.
+func (h *TimerHub) seedEmittedLocked(room string) {
+	rt := h.rooms[room]
+	if rt == nil || !rt.running {
+		return
+	}
+	e := h.elapsedSecondsLocked(rt)
+	if rt.cfg.WarnSeconds() > 0 && e >= rt.warnAt() {
+		rt.emitted["warning"] = true
+	}
+	if e >= rt.endAt() {
+		rt.emitted["end"] = true
+	}
+	if e >= rt.graceAt() {
+		rt.emitted["grace-end"] = true
+	}
+}
+
+func cueID(rt *roomTimer, name string) string {
+	return fmt.Sprintf("%d-%s", rt.runningSince.UnixNano(), name)
 }
 
 // subscribersLocked returns the current subscriber channels for a room. Caller

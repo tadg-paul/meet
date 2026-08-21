@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,6 +43,8 @@ type stateView struct {
 	Paused    bool            `json:"paused"`
 	Extended  bool            `json:"extended"`
 	Config    timerConfigView `json:"config"`
+	Cue       string          `json:"cue"`
+	CueID     string          `json:"cueId"`
 }
 
 // --- fixture ---
@@ -50,7 +53,14 @@ type timerFixture struct {
 	ts      *httptest.Server
 	dataDir string
 	privKey *rsa.PrivateKey
+	nowMu   sync.Mutex // guards now; the hub ticker reads it off-goroutine (#21)
 	now     time.Time
+}
+
+func (f *timerFixture) clock() time.Time {
+	f.nowMu.Lock()
+	defer f.nowMu.Unlock()
+	return f.now
 }
 
 func newTimerFixture(t *testing.T) *timerFixture {
@@ -82,7 +92,7 @@ func (f *timerFixture) build(t *testing.T) *httptest.Server {
 		DataDir:      f.dataDir,
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		JWTPublicKey: &f.privKey.PublicKey,
-		Now:          func() time.Time { return f.now },
+		Now:          f.clock,
 	})
 	return httptest.NewServer(srv.Handler())
 }
@@ -94,7 +104,11 @@ func (f *timerFixture) restart(t *testing.T) {
 	f.ts = f.build(t)
 }
 
-func (f *timerFixture) advance(d time.Duration) { f.now = f.now.Add(d) }
+func (f *timerFixture) advance(d time.Duration) {
+	f.nowMu.Lock()
+	f.now = f.now.Add(d)
+	f.nowMu.Unlock()
+}
 
 func (f *timerFixture) jwt(t *testing.T, room string) string {
 	t.Helper()
@@ -645,5 +659,128 @@ func TestTimer_RuntimeNotPersisted_RT15_36(t *testing.T) {
 	}
 	if sv.Config.Total != 300 {
 		t.Errorf("after restart total=%d, want retained 300", sv.Config.Total)
+	}
+}
+
+// --- #21: server-driven cues and heartbeat re-anchor ---
+
+// waitCue reads SSE events for up to d and reports whether a cue of the given
+// name arrived.
+func waitCue(t *testing.T, s *sseStream, name string, d time.Duration) bool {
+	t.Helper()
+	deadline := time.After(d)
+	for {
+		select {
+		case sv := <-s.events:
+			if sv.Cue == name {
+				return true
+			}
+		case err := <-s.errs:
+			t.Fatalf("SSE error waiting for cue %q: %v", name, err)
+		case <-deadline:
+			return false
+		}
+	}
+}
+
+func TestTimerCue_WarningEmittedByServer_RT21_1(t *testing.T) {
+	f := newTimerFixture(t)
+	f.modControl(t, "r", "set", stdConfig()) // total 300, warnAt 240
+	f.modControl(t, "r", "start", nil)
+	s := f.openSSE(t, "r")
+	s.next(t) // drain the initial snapshot (elapsed 0)
+	f.advance(240 * time.Second)
+	if !waitCue(t, s, "warning", 3*time.Second) {
+		t.Fatal("server did not emit a warning cue after elapsed crossed warnAt")
+	}
+}
+
+func TestTimerCue_EndEmittedByServer_RT21_2(t *testing.T) {
+	f := newTimerFixture(t)
+	f.modControl(t, "r", "set", stdConfig())
+	f.modControl(t, "r", "start", nil)
+	s := f.openSSE(t, "r")
+	s.next(t)
+	f.advance(300 * time.Second)
+	if !waitCue(t, s, "end", 3*time.Second) {
+		t.Fatal("server did not emit an end cue at total")
+	}
+}
+
+func TestTimerCue_GraceEndEmittedByServer_RT21_3(t *testing.T) {
+	f := newTimerFixture(t)
+	f.modControl(t, "r", "set", stdConfig())
+	f.modControl(t, "r", "start", nil)
+	s := f.openSSE(t, "r")
+	s.next(t)
+	f.advance(390 * time.Second) // total+grace = 300+90
+	if !waitCue(t, s, "grace-end", 3*time.Second) {
+		t.Fatal("server did not emit a grace-end cue at the grace limit")
+	}
+}
+
+func TestTimerCue_GraceEndSuppressedWhenExtended_RT21_4(t *testing.T) {
+	f := newTimerFixture(t)
+	f.modControl(t, "r", "set", stdConfig())
+	f.modControl(t, "r", "start", nil)
+	s := f.openSSE(t, "r")
+	s.next(t)
+	f.advance(350 * time.Second) // in grace, before the 390 limit
+	f.modControl(t, "r", "extend", nil)
+	f.advance(60 * time.Second) // 410, past the limit
+	if waitCue(t, s, "grace-end", 1500*time.Millisecond) {
+		t.Fatal("grace-end cue should be suppressed once the timer is extended")
+	}
+}
+
+func TestTimerHeartbeat_ReanchorsWithoutControl_RT21_5(t *testing.T) {
+	f := newTimerFixture(t)
+	f.modControl(t, "r", "set", stdConfig())
+	f.modControl(t, "r", "start", nil)
+	s := f.openSSE(t, "r")
+	s.next(t)                   // initial, elapsed 0
+	f.advance(15 * time.Second) // >= heartbeat interval (10), < warnAt (240)
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case sv := <-s.events:
+			if sv.Cue == "" && sv.Elapsed >= 15 {
+				return // a fresh state arrived with no control action
+			}
+		case err := <-s.errs:
+			t.Fatalf("SSE error: %v", err)
+		case <-deadline:
+			t.Fatal("no heartbeat re-anchor was delivered without a control action")
+		}
+	}
+}
+
+func TestTimerCue_FiresOncePerRun_RT21_6(t *testing.T) {
+	f := newTimerFixture(t)
+	f.modControl(t, "r", "set", stdConfig())
+	f.modControl(t, "r", "start", nil)
+	s := f.openSSE(t, "r")
+	s.next(t)
+	f.advance(240 * time.Second)
+	if !waitCue(t, s, "warning", 3*time.Second) {
+		t.Fatal("warning cue not emitted")
+	}
+	f.advance(10 * time.Second) // 250, still before end
+	if waitCue(t, s, "warning", 1500*time.Millisecond) {
+		t.Fatal("warning cue must not repeat within the same run")
+	}
+}
+
+func TestTimerCue_LateJoinerGetsNoStaleCue_RT21_7(t *testing.T) {
+	f := newTimerFixture(t)
+	f.modControl(t, "r", "set", stdConfig())
+	f.modControl(t, "r", "start", nil)
+	f.advance(240 * time.Second) // cross warnAt with no subscriber connected
+	s := f.openSSE(t, "r")
+	if first := s.next(t); first.Cue != "" {
+		t.Fatalf("late joiner initial state carried cue %q, want none", first.Cue)
+	}
+	if waitCue(t, s, "warning", 1500*time.Millisecond) {
+		t.Fatal("late joiner must not receive a cue for a boundary already passed")
 	}
 }

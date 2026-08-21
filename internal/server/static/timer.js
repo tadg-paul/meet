@@ -52,35 +52,66 @@ window.initTimer = (api, jwt) => {
     document.addEventListener('keydown', armAudio, { once: true });
     api.addEventListener('videoConferenceJoined', armAudio);
 
-    // Play a cue and mute this participant's own microphone for its duration so
-    // the cue is not captured and re-broadcast (issue #15, AC15.15, all cues).
-    const muteForCue = (audio) => {
-        if (!api || !api.isAudioMuted) {
-            return;
+    // Play a cue, muting this participant's own microphone around it so the cue
+    // is not captured and re-broadcast (issue #15, AC15.15). The mute is applied
+    // BEFORE the sound and padded either side so no opening sliver leaks, and it
+    // is restored only when this client did the muting and the operator has not
+    // altered the mic in the meantime (issue #21).
+    const CUE_PAD_MS = 300;
+
+    const startAudio = (audio) => {
+        audio.currentTime = 0;
+        const p = audio.play();
+        if (p && p.catch) {
+            p.catch(() => {});
         }
-        api.isAudioMuted().then((muted) => {
-            if (muted) {
-                return; // already muted: leave it
-            }
-            api.executeCommand('toggleAudio');
-            const restore = () => {
-                api.executeCommand('toggleAudio');
-                audio.removeEventListener('ended', restore);
-            };
-            audio.addEventListener('ended', restore);
-        }).catch(() => {});
     };
 
     const playCue = (audio) => {
         if (!audio) {
             return;
         }
-        audio.currentTime = 0;
-        const p = audio.play();
-        if (p && p.catch) {
-            p.catch(() => {});
+        if (!api || !api.isAudioMuted) {
+            startAudio(audio);
+            return;
         }
-        muteForCue(audio);
+        api.isAudioMuted().then((muted) => {
+            if (muted) {
+                startAudio(audio); // already muted (e.g. by the moderator): nothing leaks
+                return;
+            }
+            muteThenPlay(audio);
+        }).catch(() => startAudio(audio));
+    };
+
+    const muteThenPlay = (audio) => {
+        api.executeCommand('toggleAudio'); // mute before the sound
+        // Our own toggle raises one mute-status change; a further change means
+        // the operator altered this mic, so we leave it as they set it.
+        let changes = 0;
+        const onMuteChange = () => { changes += 1; };
+        api.addEventListener('audioMuteStatusChanged', onMuteChange);
+
+        let restored = false;
+        const restore = () => {
+            if (restored) {
+                return;
+            }
+            restored = true;
+            api.removeEventListener('audioMuteStatusChanged', onMuteChange);
+            audio.removeEventListener('ended', onEnded);
+            if (changes <= 1) {
+                api.isAudioMuted().then((m) => {
+                    if (m) {
+                        api.executeCommand('toggleAudio'); // unmute: restore
+                    }
+                }).catch(() => {});
+            }
+        };
+        const onEnded = () => setTimeout(restore, CUE_PAD_MS);
+        audio.addEventListener('ended', onEnded);
+        setTimeout(() => startAudio(audio), CUE_PAD_MS); // pad before the sound
+        setTimeout(restore, 15000); // safety net if 'ended' never fires
     };
 
     // --- phase computation (mirror of the server) ---
@@ -176,15 +207,9 @@ window.initTimer = (api, jwt) => {
         } else if (!from.running && to.running) {
             playCue(sounds.resume);
         }
-        if (from.phase === 'before-warning' && to.phase === 'after-warning') {
-            playCue(sounds.warning);
-        }
-        if ((from.phase === 'before-warning' || from.phase === 'after-warning') && to.phase === 'grace') {
-            playCue(sounds.end);
-        }
-        if (from.phase === 'grace' && to.phase === 'exceeded') {
-            playCue(sounds.graceEnd);
-        }
+        // The time-based cues (warning, end, grace-end) are played on the
+        // server's instruction in applyState, not derived from the local clock,
+        // so every client fires them together (issue #21).
     };
 
     const render = () => {
@@ -348,6 +373,15 @@ window.initTimer = (api, jwt) => {
     };
 
     // --- SSE subscription ---
+    // Time-based cues are played on the server's instruction, each at most once
+    // per run (guarded by cueId across reconnects and heartbeats) (issue #21).
+    const cueSounds = {
+        warning: sounds.warning,
+        end: sounds.end,
+        'grace-end': sounds.graceEnd,
+    };
+    const playedCues = new Set();
+
     const applyState = (view) => {
         anchor = {
             baseElapsed: view.elapsed,
@@ -357,6 +391,10 @@ window.initTimer = (api, jwt) => {
             cfg: view.config,
             extended: view.extended,
         };
+        if (view.cue && view.cueId && !playedCues.has(view.cueId)) {
+            playedCues.add(view.cueId);
+            playCue(cueSounds[view.cue]);
+        }
         render();
     };
     const connect = () => {
